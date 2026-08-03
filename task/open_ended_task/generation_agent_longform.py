@@ -16,6 +16,12 @@ from qwen_agent.settings import MAX_LLM_CALL_PER_RUN
 from qwen_agent.tools import BaseTool
 from qwen_agent.utils.utils import format_as_text_message, merge_generate_cfgs
 from generation_prompt_longform import *
+# PROMPT_VARIANT=findings swaps in the findings-first proposer, which investigates
+# for structure in the corpus before writing a question. Same agent loop and tools;
+# only build_system_prompt() differs, so both variants can be run over the same
+# keywords and compared directly.
+if os.getenv('PROMPT_VARIANT', 'default') == 'findings':
+    from generation_prompt_findings import build_system_prompt
 import time
 import asyncio
 import boto3
@@ -141,7 +147,12 @@ class MultiTurnReactAgent(FnCallAgent):
                 print(f"WARNING: API_BASE is set for OpenAI model. This may indicate vLLM usage. Using api_base: {api_base}")
                 call_kwargs["api_base"] = api_base
         elif model_name.startswith("vllm/"):
-            # Local vLLM (OpenAI compatible format) configuration
+            # Local vLLM (OpenAI compatible format) configuration.
+            # LiteLLM routes the bare "vllm/" prefix to its *offline* backend, which
+            # imports the vllm package and loads weights in-process. Rewrite to
+            # "hosted_vllm/", which is the OpenAI-compatible HTTP client.
+            model_name = f"hosted_vllm/{model_name[len('vllm/'):]}"
+            call_kwargs["model"] = model_name
             api_key = os.environ.get("DEEPRESEARCH_OPENAI_API_KEY", "EMPTY")
             call_kwargs["api_key"] = api_key
             # vLLM must set api_base
@@ -296,12 +307,19 @@ class MultiTurnReactAgent(FnCallAgent):
         if last_token_count > 0:
             return last_token_count
         
-        # Fallback to local calculation
-        tokenizer = AutoTokenizer.from_pretrained(self.llm_local_path) 
+        # Fallback to local calculation. llm_local_path is the LiteLLM model name
+        # (e.g. "vllm/qwen3.5-122b"), which is not a loadable tokenizer, so allow
+        # TOKENIZER_PATH to point at the real weights directory.
+        tokenizer_path = os.environ.get("TOKENIZER_PATH") or self.llm_local_path
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        except Exception as e:
+            print(f"WARNING: could not load tokenizer from '{tokenizer_path}' ({e}). "
+                  f"Set TOKENIZER_PATH to the model directory for accurate counts.")
+            return 0
         full_prompt = tokenizer.apply_chat_template(messages, tokenize=False)
-        tokens = tokenizer(full_prompt, return_tensors="pt")
-        token_count = len(tokens["input_ids"][0])
-        
+        token_count = len(tokenizer(full_prompt)["input_ids"])
+
         return token_count
             
     def save_trajectory(self, result):
@@ -482,8 +500,45 @@ class MultiTurnReactAgent(FnCallAgent):
                                 try:
                                     tool_call = json.loads(cleaned_call)
                                 except:
-                                    raise parse_error
-                            
+                                    # Qwen models fall back to their native XML call
+                                    # syntax when the JSON form is not reinforced:
+                                    #   <function=search>
+                                    #   <arguments>
+                                    #   {"query": [...]}
+                                    # A run that slips into this format never
+                                    # recovers on its own - one trajectory spent 25
+                                    # calls repeating it, read the error each time,
+                                    # and still produced its question with zero
+                                    # retrieved evidence.
+                                    fn = re.search(
+                                        r'<function\s*=\s*([\w\-]+)\s*>(.*)',
+                                        tool_call_raw, re.DOTALL)
+                                    if not fn:
+                                        raise parse_error
+                                    body = fn.group(2)
+                                    arg_match = re.search(
+                                        r'<arguments>(.*?)(?:</arguments>|$)',
+                                        body, re.DOTALL)
+                                    arg_text = (arg_match.group(1) if arg_match else body).strip()
+                                    brace = arg_text.find('{')
+                                    if brace == -1:
+                                        raise parse_error
+                                    depth, end = 0, -1
+                                    for i, ch in enumerate(arg_text[brace:], brace):
+                                        if ch == '{':
+                                            depth += 1
+                                        elif ch == '}':
+                                            depth -= 1
+                                            if depth == 0:
+                                                end = i
+                                                break
+                                    if end == -1:
+                                        raise parse_error
+                                    tool_call = {
+                                        "name": fn.group(1),
+                                        "arguments": json5.loads(arg_text[brace:end + 1]),
+                                    }
+
                             tool_name = tool_call.get('name', '')
                             tool_args = tool_call.get('arguments', {})
                             # Create deep copy of tool_args for saving query, avoid circular reference

@@ -4,9 +4,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Activate the DeepResearch environment
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate deepresearch
+# Activate the client environment. Prefer the repo-local uv venv; fall back to
+# the conda env the upstream project assumes.
+if [[ -f "${REPO_ROOT}/.venv/bin/activate" ]]; then
+  source "${REPO_ROOT}/.venv/bin/activate"
+else
+  source "$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate deepresearch
+fi
+
+# Local overrides (endpoint, credentials, scale). Sets everything below when present.
+if [[ -f "${REPO_ROOT}/env.local.sh" ]]; then
+  source "${REPO_ROOT}/env.local.sh"
+fi
 
 # Common API configuration
 export SERPER_KEY_ID="${SERPER_KEY_ID:-your_serper_api_key}"

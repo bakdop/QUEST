@@ -378,10 +378,12 @@ async def main():
     Main async function, execute all iterations concurrently
     """
     # Total number of tasks: control the total number to generate
-    num_iterations = 10  # Can be modified as needed
-    
+    num_iterations = int(os.environ.get("NUM_ITERATIONS", 10))
+
     # Concurrency control: use Semaphore to limit the number of workers running simultaneously
-    workers = 1  # Can be modified as needed
+    workers = int(os.environ.get("WORKERS", 1))
+
+    print(f"Config: num_iterations={num_iterations}, workers={workers}")
     
     # Create thread pool executor
     global executor

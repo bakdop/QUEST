@@ -1,4 +1,10 @@
 .secrets/
+env.local.sh
+.venv/
+.venv-vllm/
+serving/endpoint.txt
+outputs/
+database/
 __pycache__/
 *.py[cod]
 inference/cache/

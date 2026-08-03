@@ -8,15 +8,25 @@ import concurrent.futures
 import threading
 from litellm import completion
 
-# OPENAI
-# os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY")
-# model="openai/gpt-5" 
+# Model configuration, in LiteLLM naming convention. Credentials are read from
+# the environment rather than hardcoded here:
+#   OPENAI  -> CRITERIA_MODEL_NAME=openai/gpt-5,   OPENAI_API_KEY=...
+#   AZURE   -> CRITERIA_MODEL_NAME=azure/gpt-5,    AZURE_API_KEY/AZURE_API_BASE/AZURE_API_VERSION=...
+#   vLLM    -> CRITERIA_MODEL_NAME=openai/<served-model-name>, API_BASE=http://<host>:<port>/v1, API_KEY=EMPTY
+model = os.environ.get("CRITERIA_MODEL_NAME", "azure/gpt-5")
 
-# AZURE
-os.environ["AZURE_API_KEY"] = "" # "my-azure-api-key"
-os.environ["AZURE_API_BASE"] = "" # "https://example-endpoint.openai.azure.com"
-os.environ["AZURE_API_VERSION"] = "" # "2023-05-15"
-model="azure/gpt-5" 
+# Extra kwargs forwarded to every completion() call. api_base/api_key are only
+# passed when set, so cloud providers keep resolving credentials the usual way.
+COMPLETION_KWARGS = {}
+if os.environ.get("API_BASE"):
+    COMPLETION_KWARGS["api_base"] = os.environ["API_BASE"]
+if os.environ.get("API_KEY"):
+    COMPLETION_KWARGS["api_key"] = os.environ["API_KEY"]
+
+# Local servers generally reject reasoning_effort; set to "none" to omit it.
+_reasoning_effort = os.environ.get("CRITERIA_REASONING_EFFORT", "low")
+if _reasoning_effort.lower() != "none":
+    COMPLETION_KWARGS["reasoning_effort"] = _reasoning_effort
 
 
 # Import dimension weight generation prompts for English
@@ -32,8 +42,8 @@ from prompt.criteria_prompt_en import (
 # Processing parameters
 RETRY_ATTEMPTS = 5
 RETRY_DELAY = 5
-PROCESS_LIMIT = 500
-MAX_WORKERS = 10
+PROCESS_LIMIT = int(os.environ.get("CRITERIA_PROCESS_LIMIT", 500))
+MAX_WORKERS = int(os.environ.get("CRITERIA_MAX_WORKERS", 10))
 DEFAULT_SAMPLE_COUNT = 3
 
 # Thread-safe locks
@@ -47,8 +57,8 @@ class AIClient():
         response = completion(
             model=model,
             messages=[{ "content": user_prompt,"role": "user"}],
-            reasoning_effort="low",
-            max_tokens=5120
+            max_tokens=int(os.environ.get("CRITERIA_MAX_TOKENS", 5120)),
+            **COMPLETION_KWARGS
         )
         # print(response)
         print(1)
@@ -57,10 +67,26 @@ ai_client = AIClient()
 
 def parse_llm_output_as_json(text: str, expected_type: type = list) -> dict or list or None:
     """Parse JSON output from text"""
-    # Try to extract JSON from special markers
-    match = re.search(r'<json_output>(.*?)</json_output>', text, re.DOTALL | re.IGNORECASE)
-    if match:
-        json_str = match.group(1).strip()
+    # Thinking models return their reasoning inline (no reasoning parser on the
+    # server), and while reasoning they mention the tag names they are about to
+    # emit. Drop everything up to the end of the reasoning block first, so those
+    # mentions cannot be mistaken for the real output.
+    think_end = text.rfind('</think>')
+    if think_end != -1:
+        text = text[think_end + len('</think>'):]
+
+    # Take the LAST tagged block: a first-match search would start at a mention
+    # inside prose and run all the way to the real closing tag.
+    matches = re.findall(r'<json_output>(.*?)</json_output>', text, re.DOTALL | re.IGNORECASE)
+    if matches:
+        json_str = matches[-1].strip()
+        if json_str.startswith("```json"):
+            json_str = json_str[7:]
+        if json_str.startswith("```"):
+            json_str = json_str[3:]
+        if json_str.endswith("```"):
+            json_str = json_str[:-3]
+        json_str = json_str.strip()
     else:
         # Handle possible code block format
         json_str = text.strip()
