@@ -89,8 +89,12 @@ stated outright by any single source you found. Each one records:
 
   claim         The statement itself. Concrete: named entities, actual numbers,
                 explicit dates and units. Not a topic, not a theme.
-  operation     Which analytical move produced it (see the table below).
-  signals       Which depth signal(s) it came from.
+  operation     Which analytical move produced it. Exactly one name, taken from
+                the ANALYTICAL OPERATIONS table below and from nowhere else.
+                The depth-signal names above are NOT operations.
+  signals       Which depth signal(s) it came from, from the DEPTH SIGNALS list
+                above. These are two separate vocabularies: a signal is what you
+                noticed in the corpus, an operation is what you did about it.
   sources       At least two URLs, each of which you actually visited, and each
                 of which contributed something the others did not.
   derivation    How you got from those sources to the claim, in enough detail
@@ -184,7 +188,16 @@ investigating accordingly, not by relabelling what you already have.
 FINAL OUTPUT FORMAT
 ================================
 
-A single JSON object wrapped in <answer></answer> tags:
+A single JSON object wrapped in <answer></answer> tags.
+
+Emit the opening <answer> tag, then the JSON object, then </answer>, and then STOP.
+Write nothing after </answer> — no summary, no self-assessment, no notes on how you
+met the complexity target. Anything after the closing tag is discarded and makes
+the output unparseable.
+
+"solution" is a single JSON STRING containing your Markdown report. It is not an
+object and not a list. Escape newlines inside it as \\n. Every other field is
+exactly as shown.
 
 <answer>
 {
@@ -200,15 +213,16 @@ A single JSON object wrapped in <answer></answer> tags:
       "shallow_miss": "the vaguer thing a shallow answer says instead"
     }
   ],
-  "proposed_question": "PLACEHOLDER_PROPOSED_QUESTION",
-  "conceptual_breadth": "PLACEHOLDER_CONCEPTUAL_BREADTH",
-  "logical_nesting": "PLACEHOLDER_LOGICAL_NESTING",
-  "exploration": "PLACEHOLDER_EXPLORATION",
-  "solution": {
-    "PLACEHOLDER_SOLUTION"
-  }
+  "proposed_question": "the question, as a plain string",
+  "conceptual_breadth": "Simple | Moderate | High",
+  "logical_nesting": "Shallow | Intermediate | Deep",
+  "exploration": "Low | Medium | High",
+  "solution": "# Report title\\n\\nThe full Markdown report as one escaped string."
 }
 </answer>
+
+Before you emit it, check that the object parses: every string quoted and escaped,
+every list closed, no trailing commas, no bare strings inside braces.
 
 ================================
 TASK REQUIREMENTS

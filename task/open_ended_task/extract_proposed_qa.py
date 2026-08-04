@@ -1,14 +1,47 @@
 import json
 import os
+import re
 import argparse
+
+
+def _strip_trailing_closers(text):
+    """The model occasionally emits one closing brace too many."""
+    while text.count('{') < text.count('}'):
+        idx = text.rfind('}')
+        text = text[:idx] + text[idx + 1:]
+        try:
+            return json.loads(text), text
+        except json.JSONDecodeError:
+            continue
+    return None, text
+
+
+def _rescue_bare_solution(text):
+    """Recover `"solution": { "...markdown..." }` — an object holding a bare
+    string, which is not valid JSON.
+
+    The output template in both prompts used to show `"solution": {
+    "PLACEHOLDER_SOLUTION" }`, and the model reproduced that shape faithfully.
+    The template is fixed, but the report is the longest and most escape-prone
+    field in the object, so keep salvaging it rather than losing the question and
+    findings along with it.
+    """
+    m = re.search(r'"solution"\s*:\s*\{\s*(".*")\s*\}\s*\}?\s*$', text, re.DOTALL)
+    if not m:
+        return None
+    patched = text[:m.start()] + '"solution": ' + m.group(1) + '}'
+    try:
+        return json.loads(patched)
+    except json.JSONDecodeError:
+        return None
 
 
 def coerce_prediction_json(pred):
     """Return prediction['json'] as a dict, or None if it cannot be recovered.
 
-    The agent stores the raw model text when its own JSON parse fails. In
-    practice the model occasionally emits one closing brace too many, which is
-    otherwise valid JSON, so strip trailing unbalanced closers before giving up.
+    The agent stores the raw model text when its own JSON parse fails, so a
+    trajectory whose report merely had a formatting slip would otherwise be
+    dropped entirely.
     """
     raw = pred.get('json') if isinstance(pred, dict) else None
     if isinstance(raw, dict):
@@ -20,14 +53,10 @@ def coerce_prediction_json(pred):
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    while text.count('{') < text.count('}'):
-        idx = text.rfind('}')
-        text = text[:idx] + text[idx + 1:]
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            continue
-    return None
+    parsed, text = _strip_trailing_closers(text)
+    if parsed is not None:
+        return parsed
+    return _rescue_bare_solution(text)
 
 
 def main():
