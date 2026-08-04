@@ -218,7 +218,14 @@ def render_findings(item):
             parts.append(f"  how it was established: {f['derivation']}")
         if f.get("shallow_miss"):
             parts.append(f"  what a shallow answer says instead: {f['shallow_miss']}")
-        if f.get("sources"):
+        # evidence[] is the current shape; sources[] was the first-run shape.
+        ev = f.get("evidence")
+        if isinstance(ev, list) and ev:
+            for e in ev[:4]:
+                if isinstance(e, dict):
+                    q = (e.get("quote") or "")[:200]
+                    parts.append(f"  source {e.get('url','')}\n    quotes: {q}")
+        elif f.get("sources"):
             parts.append(f"  sources: {', '.join(map(str, f['sources'][:4]))}")
         out.append("\n".join(parts))
     return "\n\n".join(out)

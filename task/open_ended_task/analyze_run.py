@@ -20,6 +20,10 @@ OPERATIONS = {
     "EXTRAPOLATE", "CHECK_FEASIBILITY", "FRAME_METRIC", "BOUND", "SEGMENT",
     "COUNTERFACTUAL", "RULE_OUT",
 }
+# Operations whose whole purpose is to produce a figure no source states, so a
+# number missing from the corpus is expected rather than suspicious.
+COMPUTES_NEW_FIGURES = {"DERIVE", "NORMALIZE", "QUANTIFY_IMPACT", "EXTRAPOLATE", "SEGMENT"}
+
 # Register tells: phrases absent from all 101 ResearchRubrics prompts that the
 # generator reaches for when it slips into report-brief voice.
 BLEED = ["structural", "aggregate", "affects the interpretation",
@@ -51,6 +55,93 @@ def norm(s):
     return re.sub(r"\s+", " ", s or "").lower()
 
 
+def _corpus_by_iteration(run):
+    """Tool-response text per trajectory, keyed by iteration_id."""
+    tdir = os.path.join(run, "trajectories")
+    out = {}
+    if not os.path.isdir(tdir):
+        return out
+    for name in os.listdir(tdir):
+        if not name.endswith(".json"):
+            continue
+        try:
+            d = json.load(open(os.path.join(tdir, name)))
+        except (OSError, json.JSONDecodeError):
+            continue
+        text = " ".join((m.get("content") or "") for m in d.get("messages", [])
+                        if m.get("role") == "user")
+        out[d.get("iteration_id")] = norm(text)
+    return out
+
+
+def grounding_report(run, qa):
+    """Do the figures in each claim actually appear in what was retrieved?
+
+    An audit of the first run found 3 of 39 findings carried numbers that existed
+    nowhere in the trajectory, and one cited an outlet that was never fetched. A
+    fabricated figure becomes a grading criterion demanding a false fact, so it is
+    the most damaging defect the pipeline can emit — and the cheapest to detect.
+
+    Rows are matched to trajectories positionally: extract_proposed_qa.py numbers
+    rows in sorted-filename order, so row N is the Nth trajectory by that order.
+    """
+    corp = _corpus_by_iteration(run)
+    if not corp:
+        return
+    iters = sorted(corp)
+    ungrounded, quoted_ok, quoted_tot, checked = [], 0, 0, 0
+    for pos, q in enumerate(qa):
+        text = corp.get(iters[pos]) if pos < len(iters) else None
+        if text is None:
+            continue
+        for f in (q.get("findings") or []):
+            if not isinstance(f, dict):
+                continue
+            # DERIVE and friends exist precisely to produce a number no source
+            # states, so a figure missing from the corpus is expected there and
+            # proves nothing. Only quoting operations are checked this way.
+            if f.get("operation") in COMPUTES_NEW_FIGURES:
+                continue
+            checked += 1
+            figs = re.findall(r'\b\d[\d,]*\.?\d*\s*%|[$£€]\s?[\d,]+(?:\.\d+)?'
+                              r'|\b\d[\d,]*\.?\d*\s*(?:million|billion)\b',
+                              f.get("claim") or "")
+            missing = [x for x in figs if norm(x) not in text
+                       and norm(x.replace(",", "")) not in text]
+            if missing:
+                ungrounded.append((q.get("id"), f.get("id"), missing[:4]))
+    for q in qa:
+        for f in (q.get("findings") or []):
+            if not isinstance(f, dict):
+                continue
+            for e in (f.get("evidence") or []):
+                if isinstance(e, dict) and e.get("quote"):
+                    quoted_tot += 1
+    if checked:
+        print(f"  figures absent from corpus  {len(ungrounded)}/{checked} "
+              f"(quoting operations only; heuristic)")
+        for qid, fid, miss in ungrounded[:6]:
+            print(f"    id={qid} {fid}: {', '.join(miss)}")
+    # The reliable check. Once findings carry verbatim quotes, a quote that is
+    # not in the corpus is fabrication outright, with no false positives from
+    # figures the model legitimately computed.
+    if quoted_tot:
+        corp_all = " ".join(corp.values())
+        ok = 0
+        for q in qa:
+            for f in (q.get("findings") or []):
+                if not isinstance(f, dict):
+                    continue
+                for e in (f.get("evidence") or []):
+                    if isinstance(e, dict) and e.get("quote"):
+                        frag = norm(e["quote"])[:60]
+                        if len(frag) > 20 and frag in corp_all:
+                            ok += 1
+        print(f"  evidence quotes found verbatim  {ok}/{quoted_tot}")
+    else:
+        print("  evidence quotes: none recorded (pre-quote schema)")
+
+
 def analyse(run):
     qa_path = os.path.join(run, "proposed_qa.jsonl")
     if not os.path.exists(qa_path):
@@ -70,12 +161,21 @@ def analyse(run):
     if findings:
         bad_ops = Counter(f.get("operation") for f in findings
                           if f.get("operation") not in OPERATIONS)
+
+        def n_sources(f):
+            ev = f.get("evidence")
+            if isinstance(ev, list):
+                return len({e.get("url") for e in ev if isinstance(e, dict) and e.get("url")})
+            return len({u for u in (f.get("sources") or [])})
+
         print(f"\nfindings {len(findings)} "
               f"({st.mean(len(q.get('findings') or []) for q in qa):.1f}/question)")
-        print(f"  >=2 sources        {sum(1 for f in findings if len(f.get('sources') or []) >= 2)}/{len(findings)}")
-        print(f"  has shallow_miss   {sum(1 for f in findings if f.get('shallow_miss'))}/{len(findings)}")
+        print(f"  >=2 distinct sources  {sum(1 for f in findings if n_sources(f) >= 2)}/{len(findings)}")
+        print(f"  has shallow_miss      {sum(1 for f in findings if f.get('shallow_miss'))}/{len(findings)}")
+        print(f"  has no_single_source  {sum(1 for f in findings if f.get('no_single_source'))}/{len(findings)}")
         if bad_ops:
-            print(f"  INVALID operation  {dict(bad_ops)}")
+            print(f"  INVALID operation     {dict(bad_ops)}")
+        grounding_report(run, qa)
 
     # --- leakage: finding content restated in the question ---
     fig_q, name_q, per_q = 0, 0, []

@@ -95,14 +95,47 @@ stated outright by any single source you found. Each one records:
   signals       Which depth signal(s) it came from, from the DEPTH SIGNALS list
                 above. These are two separate vocabularies: a signal is what you
                 noticed in the corpus, an operation is what you did about it.
-  sources       At least two URLs, each of which you actually visited, and each
-                of which contributed something the others did not.
-  derivation    How you got from those sources to the claim, in enough detail
-                that a reader could redo it. If you computed something, show the
-                inputs and the arithmetic.
-  shallow_miss  What a competent but shallow answer would say here instead. This
-                is normally a correct-but-general statement — the vaguer, more
-                summarising version of your claim.
+  evidence      At least two entries. Each is {url, quote, contributes}:
+                  url         a page you actually visited
+                  quote       a VERBATIM span copied from that page's tool
+                              response — not paraphrased, not reconstructed from
+                              memory. Every figure in your claim must appear
+                              inside one of these quotes, or be computed from
+                              figures that do.
+                  contributes what this page supplies that the others do not
+  no_single_source
+                One sentence naming what is missing from each individual page,
+                so it is clear why the claim required combining them.
+  derivation    The inferential step, not a restatement. Name what you did:
+                which two numbers you compared, what you converted, what you
+                reconciled. If you computed anything, write the arithmetic out
+                and then check it again before you commit it.
+  shallow_miss  A rival claim a competent but shallow answer would make instead —
+                normally the correct-but-vaguer version. Write it as a claim, not
+                as commentary about shallow answers, and do not make it a
+                strawman nobody would write.
+
+THREE WAYS A FINDING GOES BAD. Check each one before you keep it.
+
+  FABRICATION. A figure or a source that exists nowhere in what you retrieved.
+  This is the worst thing you can produce: it becomes a grading criterion that
+  demands a false fact. Before you write any number into a claim, find it in a
+  quote. If you cannot, the number does not go in — and if the number was the
+  point of the finding, the finding does not go in either. Never cite a
+  publication you did not actually fetch.
+
+  DECORATION. One page already contains the whole claim and the second URL is
+  there to satisfy the two-source rule. Test it: cover each source in turn — if
+  any single one still supports the entire claim, this is not a cross-source
+  finding. Either drop it or push further until it genuinely needs both.
+
+  RESTATEMENT. The derivation says the same thing as the claim in different
+  words. A derivation must contain a step: a subtraction, a unit conversion, a
+  reconciliation of two definitions, a judgement about which source wins. If you
+  cannot name the step, there was no analysis.
+
+Arithmetic errors are common and they void the finding entirely — a DERIVE whose
+sum is wrong has no value at all. Redo every calculation once before emitting.
 
 ANALYTICAL OPERATIONS
 
@@ -253,9 +286,15 @@ exactly as shown.
       "claim": "specific statement with named entities, numbers, dates",
       "operation": "ADJUDICATE",
       "signals": ["CONFLICT"],
-      "sources": ["https://...", "https://..."],
-      "derivation": "how these sources produce this claim",
-      "shallow_miss": "the vaguer thing a shallow answer says instead"
+      "evidence": [
+        {"url": "https://...", "quote": "verbatim span copied from this page",
+         "contributes": "what only this page supplies"},
+        {"url": "https://...", "quote": "verbatim span copied from this page",
+         "contributes": "what only this page supplies"}
+      ],
+      "no_single_source": "what each page individually lacks",
+      "derivation": "the step: what was compared, converted or reconciled",
+      "shallow_miss": "the vaguer rival claim a shallow answer makes instead"
     }
   ],
   "proposed_question": "the question, as a plain string",
