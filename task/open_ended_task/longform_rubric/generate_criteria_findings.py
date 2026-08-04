@@ -54,7 +54,13 @@ _print_lock = threading.Lock()
 
 
 def load_rubric_examples(k_tasks=2, k_items=7):
-    """Few-shot on real ResearchRubrics items so the output matches their register."""
+    """Few-shot on real ResearchRubrics items so the output matches their register.
+
+    Bias the sample away from figure-recall items. 71% of ResearchRubrics' Implicit
+    Criteria contain no digit at all - they ask for a mechanism, a definition, a
+    caveat, an analogy. Showing mostly digit-free examples is the cheapest way to
+    stop the generator writing "the response states that X is 47%" twenty times.
+    """
     try:
         rows = [json.loads(l) for l in open(RR_PATH)]
     except OSError:
@@ -64,7 +70,15 @@ def load_rubric_examples(k_tasks=2, k_items=7):
         return ""
     out = []
     for r in random.sample(rows, k=min(k_tasks, len(rows))):
-        items = random.sample(r["rubrics"], k=k_items)
+        pool = r["rubrics"]
+        nodigit = [i for i in pool if not re.search(r"\d", i.get("criterion", ""))]
+        withdigit = [i for i in pool if re.search(r"\d", i.get("criterion", ""))]
+        n_nd = min(len(nodigit), max(1, round(k_items * 0.7)))
+        items = random.sample(nodigit, n_nd)
+        rest = k_items - n_nd
+        if rest > 0 and withdigit:
+            items += random.sample(withdigit, min(rest, len(withdigit)))
+        random.shuffle(items)
         out.append(
             "Question: " + " ".join(r["prompt"].split())[:400] + "\nRubric items:\n"
             + "\n".join(
@@ -104,17 +118,42 @@ NOW WRITE A RUBRIC FOR THIS TASK
 Question given to the report writer:
 {question}
 
-The researcher who designed this question already investigated the topic. These are the findings they established - each is specific, drawn from at least two sources, and NOT stated outright by any single source. The question deliberately does not mention them; a good answer has to arrive at them independently.
+The researcher who designed this question already investigated the topic.
+
+FINDINGS - each is a judgement they had to work out, drawn from at least two sources and NOT stated outright by any single source. The question deliberately does not mention them; a good answer has to arrive at them independently. These are what separate a deep answer from a shallow one.
 
 {findings}
 
+ESSENTIALS - ordinary competent content the answer needs. Each may sit on a single page and required no analysis, but a knowledgeable reader would expect it and the report is incomplete without it. These are most of what a good answer contains.
+
+{essentials}
+
 INSTRUCTIONS
-1. Turn every finding into at least one Implicit Criteria item stating the specific content the report must contain - the named entity, the actual number, the date, the unit. Do not soften a finding into a theme.
-2. Where a finding records what a shallow answer says instead, add a negative-weight item that fires when the report gives only that vaguer version.
-3. Add Explicit Criteria for what the question asked for directly.
-4. Add Synthesis items where the answer must reconcile or combine findings rather than list them.
-5. Add a few Communication Quality, Instruction Following and References items.
-6. 20-30 items total. Vary the weights; do not give everything a 3.
+
+1. GRADE THE JUDGEMENT, NOT THE LOOKUP. Each finding's CONCLUSION is a judgement the researcher had to work out. Turn it into an Implicit Criteria item that tests whether the report reaches that judgement. Do not turn it into a test of whether the report reproduced the underlying numbers.
+
+   finding conclusion: "The 73% and 55% employment figures are not comparable - 73%
+   is a NACE First Destination rate covering six months post-graduation including
+   continued study, 55% is straight employment for a different cohort - so for a
+   2026 applicant the 73% is the relevant figure."
+
+   wrong  "The response states KSU's 73% career outcomes rate and its 55%
+           employment rate."                        <- fact recall, any diligent
+                                                       searcher passes it
+   right  "The response recognises that the employment figures it cites rest on
+           different survey methodologies and cohorts, and identifies which one
+           applies to a current applicant rather than presenting them as
+           competing estimates of the same quantity."
+
+   Figures belong inside the item as supporting detail in an "(e.g., ...)" list, not as the thing being tested.
+
+2. Turn each ESSENTIAL into an Implicit Criteria item too. These are the "expected of a competent answer but never asked for" items that make up most of a real rubric - a definition given at first use, a standard option named, an eligibility rule stated, a common pitfall flagged. Write them the way ResearchRubrics does, with an acceptance list where the demand is open-ended.
+3. Where a finding records what a shallow answer concludes instead, add a negative-weight item that fires when the report reaches only that weaker conclusion.
+4. Add Explicit Criteria for what the question asked for directly.
+5. Add Synthesis items where the answer must reconcile or combine findings rather than list them.
+6. Add a few Communication Quality, Instruction Following and References items.
+7. 25-35 items total. Vary the weights; do not give everything a 3.
+8. At most a third of Implicit items may hinge on a specific figure. The rest must demand an explanation, a mechanism, a caveat, a judgement of applicability, or a recognition that two things are not comparable.
 
 WRITING RULES - these are what separate a usable rubric from a checklist
 
@@ -204,6 +243,15 @@ def parse_items(text):
 
 
 def render_findings(item):
+    """Lead with the conclusion, not the observation.
+
+    A finding's observation is the raw material - the figures on the pages. When
+    rubric items were written from it, they came out as fact-recall: 59% of the
+    generated Implicit items carried a digit against 29% in ResearchRubrics, whose
+    items overwhelmingly demand a judgement instead ("describes at least one
+    plausible mechanism by which...", "includes one caveat where data are sparse").
+    The conclusion and why_it_matters are the parts worth grading.
+    """
     fs = item.get("findings")
     if not fs:
         return "(none recorded - write the rubric from the question alone)"
@@ -211,30 +259,52 @@ def render_findings(item):
     for f in fs:
         if not isinstance(f, dict):
             continue
-        parts = [f"- CLAIM: {f.get('claim','')}"]
+        # `claim` was the pre-split field name; conclusion supersedes it.
+        conclusion = f.get("conclusion") or f.get("claim") or ""
+        parts = [f"- CONCLUSION (the judgement a good answer must reach): {conclusion}"]
+        if f.get("why_it_matters"):
+            parts.append(f"  why it matters: {f['why_it_matters']}")
         if f.get("operation"):
-            parts.append(f"  operation: {f['operation']}")
-        if f.get("derivation"):
-            parts.append(f"  how it was established: {f['derivation']}")
+            parts.append(f"  analytical move: {f['operation']}")
+        if f.get("observation"):
+            parts.append(f"  what the sources actually say (raw material, NOT the point): {f['observation']}")
+        if f.get("analysis") or f.get("derivation"):
+            parts.append(f"  the reasoning step: {f.get('analysis') or f.get('derivation')}")
         if f.get("shallow_miss"):
-            parts.append(f"  what a shallow answer says instead: {f['shallow_miss']}")
-        # evidence[] is the current shape; sources[] was the first-run shape.
+            parts.append(f"  what a shallow answer concludes instead: {f['shallow_miss']}")
         ev = f.get("evidence")
         if isinstance(ev, list) and ev:
-            for e in ev[:4]:
+            for e in ev[:3]:
                 if isinstance(e, dict):
-                    q = (e.get("quote") or "")[:200]
-                    parts.append(f"  source {e.get('url','')}\n    quotes: {q}")
+                    parts.append(f"  source {e.get('url','')}: {(e.get('quote') or '')[:160]}")
         elif f.get("sources"):
             parts.append(f"  sources: {', '.join(map(str, f['sources'][:4]))}")
         out.append("\n".join(parts))
     return "\n\n".join(out)
 
 
+def render_essentials(item):
+    es = item.get("essentials")
+    if not isinstance(es, list) or not es:
+        return "(none recorded)"
+    out = []
+    for e in es:
+        if not isinstance(e, dict):
+            continue
+        line = f"- {e.get('point','')}"
+        if e.get("why_expected"):
+            line += f"\n  expected because: {e['why_expected']}"
+        if e.get("source"):
+            line += f"\n  source: {e['source']}"
+        out.append(line)
+    return "\n".join(out) or "(none recorded)"
+
+
 def one(item, examples):
     prompt = PROMPT.format(examples=examples or "(none available)",
                            question=item["prompt"],
-                           findings=render_findings(item))
+                           findings=render_findings(item),
+                           essentials=render_essentials(item))
     for attempt in range(RETRIES):
         try:
             r = litellm.completion(model=MODEL, messages=[{"role": "user", "content": prompt}],

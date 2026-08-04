@@ -387,7 +387,14 @@ class MultiTurnReactAgent(FnCallAgent):
         if complexity_class:
             complexity_instruction = f"\n\nIMPORTANT: You must generate a task with complexity class {complexity_class}.\n"
             user_content += complexity_instruction
-        
+
+        # Fourth axis, carried the same way as the other three: a target stated in
+        # the prompt, not a constraint the pipeline enforces.
+        analysis_load = data.get('analysis_load')
+        self.analysis_load = analysis_load
+        if analysis_load:
+            user_content += f"\nAnalysis Load: {analysis_load}.\n"
+
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
         
         num_llm_calls_available = MAX_LLM_CALL_PER_RUN
@@ -407,6 +414,7 @@ class MultiTurnReactAgent(FnCallAgent):
                     "prediction": prediction,
                     "termination": termination,
                     "complexity_class": getattr(self, 'complexity_class', None),
+                    "analysis_load": getattr(self, 'analysis_load', None),
                     "iteration_id": iteration_id,
                     "subcategory": subcategory,
                     "cost_info": total_cost_info.copy(),  # Record cumulative cost info
@@ -623,6 +631,7 @@ class MultiTurnReactAgent(FnCallAgent):
                     "prediction": prediction,
                     "termination": termination,
                     "complexity_class": getattr(self, 'complexity_class', None),
+                    "analysis_load": getattr(self, 'analysis_load', None),
                     "iteration_id": iteration_id,
                     "subcategory": subcategory
                 }

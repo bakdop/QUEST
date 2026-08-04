@@ -170,6 +170,25 @@ def sample_complexity_class_with_weights(complexity_classes, lock):
         selected_class = random.choice(complexity_classes)
         return selected_class
 
+
+# A fourth complexity axis, orthogonal to the ResearchRubrics triple. Breadth
+# counts sources, nesting counts chained steps, exploration measures how
+# underspecified the question is; none of them says how much work happens between
+# having the sources and having the answer. A single adjudication between two
+# statistical methodologies is narrow, shallow, and still demands real analysis.
+#
+# There is no empirical distribution to sample from, so the weights are ours to
+# choose. Low is deliberately absent: a task whose answer can be read straight off
+# the sources does not need the findings machinery at all, and asking for one only
+# produces findings padded out of whatever the corpus happened to contain.
+ANALYSIS_LOAD_WEIGHTS = {"High": 0.6, "Medium": 0.4}
+
+
+def sample_analysis_load(lock):
+    with lock:
+        levels = list(ANALYSIS_LOAD_WEIGHTS)
+        return random.choices(levels, weights=[ANALYSIS_LOAD_WEIGHTS[k] for k in levels])[0]
+
 # Mapping from Domain to CSV files
 DOMAIN_TO_CSV = {
     # Lifestyle & Leisure
@@ -320,6 +339,7 @@ async def run_single_iteration(iteration_id, subcategory_counts,
             complexity_class = sample_complexity_class_with_weights(
                 complexity_classes, complexity_lock
             )
+            analysis_load = sample_analysis_load(complexity_lock)
             
             # Update the sampling count for this subcategory (thread-safe)
             with subcategory_lock:
@@ -334,6 +354,7 @@ async def run_single_iteration(iteration_id, subcategory_counts,
             print(f"Main category: {main_category}")
             print(f"Subcategory: {random_question}")
             print(f"Complexity class: {complexity_class}")
+            print(f"Analysis load: {analysis_load}")
             print(f"This subcategory has been sampled {current_subcategory_count} times")
             
             # Randomly sample 1 keyword from trending_keywords
@@ -352,6 +373,7 @@ async def run_single_iteration(iteration_id, subcategory_counts,
                     {
                         "item": {'question': random_question, 'answer': '1'},
                         "complexity_class": complexity_class,
+                        "analysis_load": analysis_load,
                         "sampled_keywords": sampled_keywords,
                         "iteration_id": iteration_id + 1,
                         "subcategory": random_question,

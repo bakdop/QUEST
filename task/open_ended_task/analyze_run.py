@@ -74,6 +74,41 @@ def _corpus_by_iteration(run):
     return out
 
 
+def restatement_report(findings):
+    """Is the conclusion doing work the observation did not already do?
+
+    Across two runs, 0 of 24 findings tagged ADJUDICATE named which conflicting
+    source wins or why — the conclusion restated the observation with the word
+    "conflicting" attached. Splitting the fields makes that measurable: a
+    conclusion whose content words are a subset of the observation's added nothing.
+    """
+    split = [f for f in findings if f.get("observation") and f.get("conclusion")]
+    if not split:
+        print("  observation/conclusion: not split (pre-split schema)")
+        return
+    thin = []
+    for f in split:
+        obs = set(re.findall(r"[a-z]{4,}", norm(f["observation"])))
+        con = set(re.findall(r"[a-z]{4,}", norm(f["conclusion"])))
+        new = con - obs
+        if len(new) <= 3:
+            thin.append((f.get("id"), sorted(new)))
+    print(f"  conclusion adds nothing new  {len(thin)}/{len(split)} "
+          f"(<=3 content words absent from its own observation)")
+    for fid, new in thin[:4]:
+        print(f"    {fid}: new words = {new}")
+
+    # ADJUDICATE has to name a winner; the others have their own tells, but this
+    # is the one that failed outright, so track it explicitly.
+    adj = [f for f in split if f.get("operation") == "ADJUDICATE"]
+    if adj:
+        VERDICT = re.compile(r"\b(more reliable|authoritative|supersede|takes precedence|"
+                             r"should be used|is the relevant|is correct|applies to|"
+                             r"methodolog|prefer|rather than the)\b", re.I)
+        ok = sum(1 for f in adj if VERDICT.search(f["conclusion"]))
+        print(f"  ADJUDICATE names a winner    {ok}/{len(adj)}")
+
+
 def grounding_report(run, qa):
     """Do the figures in each claim actually appear in what was retrieved?
 
@@ -105,7 +140,7 @@ def grounding_report(run, qa):
             checked += 1
             figs = re.findall(r'\b\d[\d,]*\.?\d*\s*%|[$£€]\s?[\d,]+(?:\.\d+)?'
                               r'|\b\d[\d,]*\.?\d*\s*(?:million|billion)\b',
-                              f.get("claim") or "")
+                              f.get("conclusion") or f.get("claim") or "")
             missing = [x for x in figs if norm(x) not in text
                        and norm(x.replace(",", "")) not in text]
             if missing:
@@ -156,6 +191,9 @@ def analyse(run):
 
     print(f"\n{'='*72}\n{run}\n{'='*72}")
     print(f"trajectories {n_traj} -> questions {len(qa)} -> rubrics {len(cr)}")
+    loads = Counter(q.get("analysis_load") for q in qa if q.get("analysis_load"))
+    if loads:
+        print(f"analysis load    {dict(loads)}")
 
     findings = [f for q in qa for f in (q.get("findings") or []) if isinstance(f, dict)]
     if findings:
@@ -168,14 +206,30 @@ def analyse(run):
                 return len({e.get("url") for e in ev if isinstance(e, dict) and e.get("url")})
             return len({u for u in (f.get("sources") or [])})
 
+        counts = [len(q.get('findings') or []) for q in qa]
         print(f"\nfindings {len(findings)} "
-              f"({st.mean(len(q.get('findings') or []) for q in qa):.1f}/question)")
+              f"({st.mean(counts):.1f}/question, range {min(counts)}-{max(counts)})")
         print(f"  >=2 distinct sources  {sum(1 for f in findings if n_sources(f) >= 2)}/{len(findings)}")
+        dup = sum(1 for f in findings
+                  if isinstance(f.get("evidence"), list)
+                  and len(f["evidence"]) > n_sources(f))
+        if dup:
+            print(f"  DUPLICATE evidence URL  {dup}/{len(findings)} "
+                  f"(two quotes from one page is one source)")
         print(f"  has shallow_miss      {sum(1 for f in findings if f.get('shallow_miss'))}/{len(findings)}")
+        print(f"  has why_it_matters    {sum(1 for f in findings if f.get('why_it_matters'))}/{len(findings)}")
         print(f"  has no_single_source  {sum(1 for f in findings if f.get('no_single_source'))}/{len(findings)}")
         if bad_ops:
             print(f"  INVALID operation     {dict(bad_ops)}")
+        restatement_report(findings)
         grounding_report(run, qa)
+
+    ess = [e for q in qa for e in (q.get("essentials") or []) if isinstance(e, dict)]
+    if ess:
+        print(f"\nessentials {len(ess)} ({len(ess)/max(len(qa),1):.1f}/question)"
+              f"  with why_expected {sum(1 for e in ess if e.get('why_expected'))}/{len(ess)}")
+    elif findings:
+        print("\nessentials: none recorded")
 
     # --- leakage: finding content restated in the question ---
     fig_q, name_q, per_q = 0, 0, []
@@ -183,7 +237,7 @@ def analyse(run):
         figs, names = set(), set()
         for f in (q.get("findings") or []):
             if isinstance(f, dict):
-                a, b = leak_tokens(f.get("claim") or "")
+                a, b = leak_tokens(f.get("conclusion") or f.get("claim") or "")
                 figs |= a
                 names |= b
         prompt = norm(q.get("prompt"))
@@ -217,8 +271,13 @@ def analyse(run):
         if items:
             ax = Counter(i.get("axis") for i in items)
             tot = sum(ax.values())
+            imp = [i for i in items if i.get("axis") == "Implicit Criteria"]
+            digit = sum(1 for i in imp if re.search(r"\d", i.get("criterion", "")))
             print(f"\nrubric items {len(items)} ({len(items)/len(cr):.1f}/question), "
                   f"{sum(1 for i in items if (i.get('weight') or 0) < 0)} negative")
+            if imp:
+                print(f"  Implicit items hinging on a figure  {digit}/{len(imp)} "
+                      f"({100*digit/len(imp):.0f}%; ResearchRubrics 29%)")
             for a, v in ax.most_common():
                 print(f"  {a:>30} {v:>4}  {100*v/tot:>5.1f}%")
 

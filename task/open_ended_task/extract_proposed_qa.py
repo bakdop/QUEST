@@ -90,9 +90,13 @@ def main():
         # question and nothing else, so it could only produce generic writing
         # standards - it had no way to know which specific facts a good answer
         # must contain. The findings-first prompt records them; keep them.
-        for key in ('spine', 'findings', 'solution'):
+        for key in ('centre', 'findings', 'essentials', 'analysis_load', 'solution'):
             if key in pred:
                 item[key] = pred[key]
+        # analysis_load is sampled by the pipeline, so trust the trajectory over
+        # whatever the model echoed back into its answer.
+        if data.get('analysis_load'):
+            item['analysis_load'] = data['analysis_load']
         out.append(item)
     print(f"extracted {len(out)}/{len(filelist)}")
     for file in skipped:
