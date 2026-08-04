@@ -93,8 +93,12 @@ def restatement_report(findings):
         new = con - obs
         if len(new) <= 3:
             thin.append((f.get("id"), sorted(new)))
+    substantive = len(split) - len(thin)
     print(f"  conclusion adds nothing new  {len(thin)}/{len(split)} "
           f"(<=3 content words absent from its own observation)")
+    print(f"  substantive conclusions      {substantive}   "
+          f"-> analysis load {'High' if substantive >= 3 else 'Medium' if substantive else 'Low'} "
+          f"by the prompt's own definition")
     for fid, new in thin[:4]:
         print(f"    {fid}: new words = {new}")
 
@@ -197,8 +201,10 @@ def analyse(run):
 
     findings = [f for q in qa for f in (q.get("findings") or []) if isinstance(f, dict)]
     if findings:
+        # `operation` is no longer a recorded field - the analysis text describes
+        # the move instead. Old runs still carry it, so only flag when present.
         bad_ops = Counter(f.get("operation") for f in findings
-                          if f.get("operation") not in OPERATIONS)
+                          if f.get("operation") and f.get("operation") not in OPERATIONS)
 
         def n_sources(f):
             ev = f.get("evidence")
@@ -217,8 +223,6 @@ def analyse(run):
             print(f"  DUPLICATE evidence URL  {dup}/{len(findings)} "
                   f"(two quotes from one page is one source)")
         print(f"  has shallow_miss      {sum(1 for f in findings if f.get('shallow_miss'))}/{len(findings)}")
-        print(f"  has why_it_matters    {sum(1 for f in findings if f.get('why_it_matters'))}/{len(findings)}")
-        print(f"  has no_single_source  {sum(1 for f in findings if f.get('no_single_source'))}/{len(findings)}")
         if bad_ops:
             print(f"  INVALID operation     {dict(bad_ops)}")
         restatement_report(findings)

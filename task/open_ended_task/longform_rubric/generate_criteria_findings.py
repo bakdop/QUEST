@@ -262,10 +262,6 @@ def render_findings(item):
         # `claim` was the pre-split field name; conclusion supersedes it.
         conclusion = f.get("conclusion") or f.get("claim") or ""
         parts = [f"- CONCLUSION (the judgement a good answer must reach): {conclusion}"]
-        if f.get("why_it_matters"):
-            parts.append(f"  why it matters: {f['why_it_matters']}")
-        if f.get("operation"):
-            parts.append(f"  analytical move: {f['operation']}")
         if f.get("observation"):
             parts.append(f"  what the sources actually say (raw material, NOT the point): {f['observation']}")
         if f.get("analysis") or f.get("derivation"):

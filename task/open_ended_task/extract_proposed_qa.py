@@ -90,7 +90,7 @@ def main():
         # question and nothing else, so it could only produce generic writing
         # standards - it had no way to know which specific facts a good answer
         # must contain. The findings-first prompt records them; keep them.
-        for key in ('centre', 'findings', 'essentials', 'analysis_load', 'solution'):
+        for key in ('findings', 'essentials', 'analysis_load', 'solution'):
             if key in pred:
                 item[key] = pred[key]
         # analysis_load is sampled by the pipeline, so trust the trajectory over
