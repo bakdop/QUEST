@@ -140,22 +140,67 @@ to STEP 2 and investigate further.
 
 STEP 5 — Write the question
 Write what a real person would actually ask about this situation, in their own
-words.
+words, BEFORE they did any of the research you just did.
 
-  - The question describes the situation and what they need. It does NOT list
-    your findings, hint at them, or ask for them item by item.
-  - Never use the vocabulary of this prompt in the question. No "adjudicate",
-    "normalize", "depth signal", "trade-off analysis across dimensions".
-  - The findings must be things the answer NEEDS, discovered by whoever answers —
-    not things the question told them to go get.
-  - It must be answerable from what you retrieved. Do not require anything you
-    did not verify.
-  - One coherent need. Not several tasks bolted together.
+That last part is the whole difficulty. You know the answers now. The asker does
+not. If your findings appear in the question, you have not written a research
+task — you have written a to-do list, and whoever answers it can skip the
+research entirely.
 
-Test it: could someone write a fluent, correct-sounding answer to this question
-while missing most of your findings? If yes, the question is too loose — sharpen
-the situation (add the specific constraint, the specific population, the specific
-time window) until the findings become unavoidable.
+THE LEAK RULE (mechanical, check it literally)
+The question may state only what the asker could know unaided: their own
+situation, their budget, their city, their deadline, what they already own, and
+any belief they hold — including a vague or mistaken one.
+
+The question must NOT contain any number, date, proper noun, or named entity that
+appears in the `claim` field of any finding.
+
+Go through your findings one at a time and search your draft question for each
+figure and name in them. If you find one, remove it and replace it with the
+asker's un-researched version of the same thing:
+
+    leaks:  "I've seen KSU advertise a 73% career outcomes rate while other
+             sources say 55% or even 97% for certain programs"
+    fixed:  "I've seen KSU quote very different employment numbers in different
+             places and I can't tell which applies to me"
+
+    leaks:  "how the Big 12's expansion from 10 to 16 teams between 2022-2025
+             affects the interpretation of his win totals"
+    fixed:  (delete it — the asker has no idea this matters; that is the point)
+
+COVERAGE AND ASYMMETRY
+Count the explicit things your question asks for. That count must be at least TWO
+FEWER than your number of findings. If you have 6 findings, ask for at most 4
+things.
+
+Then check the other direction: every finding must be reachable from the
+question — a diligent answerer working from the situation alone would have to run
+into it. A finding nothing in the question leads to means your question and your
+research have drifted apart; either sharpen the situation so it becomes reachable,
+or drop the finding.
+
+The gap between what is asked and what is needed is where the depth lives.
+
+REGISTER
+  - First person, the asker's own voice, plain words. No third-party framing
+    ("a firm has been retained to evaluate...").
+  - 60 to 110 words. The reference questions run about 70. If yours is longer it
+    is almost certainly because you enumerated your findings as bullets.
+  - Never use the vocabulary of this prompt: adjudicate, normalize, depth signal,
+    validity bound, trade-off analysis across dimensions.
+  - Avoid report-brief register: "structural", "aggregate", "affects the
+    interpretation of", "I need specific numbers", "not just the headline
+    numbers", "comprehensive analysis covering:".
+  - One coherent need, not several tasks bolted together.
+  - Answerable from what you retrieved. Do not require anything you did not
+    verify.
+
+FINAL TEST
+Could a fluent writer produce a confident, correct-sounding answer to this
+question while missing most of your findings? If yes, do NOT fix it by adding the
+findings to the question. Fix it by sharpening the asker's situation — the
+specific constraint, the specific population, the exact dates — until the findings
+become unavoidable for anyone who actually researches it.
 
 STEP 6 — Solve it
 Write the answer, in Markdown, grounded in what you retrieved. Every finding must

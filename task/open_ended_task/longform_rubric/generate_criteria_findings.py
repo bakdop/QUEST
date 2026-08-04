@@ -113,9 +113,55 @@ INSTRUCTIONS
 2. Where a finding records what a shallow answer says instead, add a negative-weight item that fires when the report gives only that vaguer version.
 3. Add Explicit Criteria for what the question asked for directly.
 4. Add Synthesis items where the answer must reconcile or combine findings rather than list them.
-5. Add a few Communication Quality, Instruction Following and References items - keep these light, they are not the point.
+5. Add a few Communication Quality, Instruction Following and References items.
 6. 20-30 items total. Vary the weights; do not give everything a 3.
-7. Every criterion must be checkable against the report alone, without access to these findings.
+
+WRITING RULES - these are what separate a usable rubric from a checklist
+
+STANDALONE. Every item must be gradeable by someone holding only the report and
+that one line. Never write "the finding", "neither study", "the exclusion
+criteria", "as established above", "the observed drop". Restate the referent
+inside the item, even if it makes the item longer.
+
+ACCEPTANCE SETS. If the item's verb is a judgment verb - explains, analyses,
+compares, reconciles, considers, details, discusses - it MUST end with a
+parenthetical listing 2-4 concrete things that count as satisfying it. This is
+what makes such an item gradeable at all:
+
+  weak:   "The response explains how the two fee schedules differ."
+  usable: "The response explains how the two fee schedules differ (e.g., that the
+           $89 tier excludes weekend pickup, that the annual plan is billed in
+           advance, that cancellation forfeits the remaining term)."
+
+ONE FACT PER ITEM. No item may assert more than two numbers or two named
+entities. If a finding contains four figures, write four items. A report that
+gets three of four must not leave two graders splitting on one line.
+
+NO PROMPT ECHO. An Explicit Criteria item may never be the question's own wording
+prefixed with "The response addresses...". Every on-topic report would pass it, so
+it measures nothing. Bind the requirement to an observable value or artifact:
+
+  echo:   "The response addresses the hidden costs of the service."
+  usable: "The response states the certificate refresh obligation and names at
+           least one recurring cost beyond bandwidth."
+
+SOFT AXES MUST BE OPERATIONAL. In Communication Quality and Instruction
+Following, the words clear, clearly, professional, suitable, appropriate,
+excessive, generic, throughout, where available and key are banned unless
+immediately followed by a test that can be run: an exact section name, a word
+count, "defined at first use", "no first-person pronouns", "as a table with one
+row per option".
+
+SPREAD THE NEGATIVES. Do not park every penalty on Implicit Criteria. A report
+can also fail by ignoring a sub-question that was asked (Instruction Following),
+by presenting a derived figure with no source (References), or by burying a
+comparison in prose that was asked for as a table (Communication Quality). Write
+penalties on at least three different axes. Avoid hinging a penalty on "implies"
+or "suggests" - a penalty must fire on something the report actually says.
+
+BALANCE. Not every item should be a number-recall check. Roughly a third of the
+Implicit items should demand an explanation, a mechanism, or a caveat rather than
+a figure.
 
 Output a JSON array and nothing else. Wrap it in <json_output></json_output> tags.
 
