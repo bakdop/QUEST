@@ -221,7 +221,7 @@ def main():
             "findings": legacy_f, "essentials": legacy_e,
             "findings_compact": finds,
             "centre": p3.get("centre"),
-            "map_change_note": (row.get("deepen") or {}).get("map_change_note"),
+            "section_changes": (row.get("deepen") or {}).get("section_changes"),
             "keyword_verdict": (row.get("explore") or {}).get("keyword_verdict"),
             # Measured, not seeded. The band names are the RR vocabulary so these
             # line up against runs that were seeded with a level.

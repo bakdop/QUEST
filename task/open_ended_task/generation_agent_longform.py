@@ -42,6 +42,11 @@ elif PROMPT_VARIANT == 'explore':
     # 3 pass their prompts in through data['system_prompt'] rather than through
     # this table, so only stage 1 needs an entry here.
     from generation_prompt_explore import build_system_prompt
+elif PROMPT_VARIANT == 'evidence_first':
+    # The three-agent chain folded back into one ReAct loop, with the derived
+    # layer removed — see generation_prompt_evidence.py for why analysis stopped
+    # being an output field.
+    from generation_prompt_evidence import build_system_prompt
 import time
 import asyncio
 from litellm import completion
@@ -406,7 +411,7 @@ class MultiTurnReactAgent(FnCallAgent):
         if sampled_keywords and not override_uc:
             keywords_str = ", ".join(sampled_keywords)
             user_content += f"\n\nInitial Keyword: {keywords_str}"
-            if PROMPT_VARIANT in ('spine', 'investigate', 'propose', 'explore'):
+            if PROMPT_VARIANT in ('spine', 'investigate', 'propose', 'explore', 'evidence_first'):
                 user_content += "\n\nNote: the keyword above is a starting point sampled from a trending-search list, not a requirement. Search wide around it first, then report in `keyword_verdict` what you did with it."
             else:
                 user_content += "\n\nNote: You have been provided with 1 initial keyword above. In STEP 1 — Brainstorm Topic, you should use these as a starting point and brainstorm a research topic that needs multi-step reasoning, cross-document synthesis, and the generation of evidence-backed, long-form answers yourself."
@@ -436,7 +441,7 @@ class MultiTurnReactAgent(FnCallAgent):
         # them afterwards in extract_chain.py. `explore` is named here because it
         # is dispatched by variant; stages 2 and 3 arrive with user_content set
         # and are covered by the second clause.
-        if PROMPT_VARIANT not in ('spine', 'explore') and not override_uc:
+        if PROMPT_VARIANT not in ('spine', 'explore', 'evidence_first') and not override_uc:
             if complexity_class:
                 complexity_instruction = f"\n\nIMPORTANT: You must generate a task with complexity class {complexity_class}.\n"
                 user_content += complexity_instruction

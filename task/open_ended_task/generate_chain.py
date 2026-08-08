@@ -116,9 +116,10 @@ def explore_user_content(topic, keyword):
 def deepen_user_content(p1, topic):
     out = [f"TOPIC AREA\n{topic}\n", f"SPINE\n{p1.get('spine')}\n"]
     subs = [s for s in (p1.get("subtopics") or []) if isinstance(s, dict)]
-    out.append("SUBTOPICS a first pass mapped, with how much material each had and what it\n"
-               "showed. This is where that pass found material, not a set of boxes to fill.\n"
-               "It stopped as soon as the shape of the topic was visible — go past it.\n")
+    # The system prompt already says what these notes are and are not; the user
+    # turn just labels them.
+    out.append("WHERE A FIRST PASS FOUND MATERIAL — its notes, with how much each turned up\n"
+               "and what it showed.\n")
     for i, s in enumerate(subs, 1):
         out.append(f"  {i}. [{s.get('material')}] {s.get('handle')} — {s.get('query')}")
         out.append(f"     shows : {s.get('what_it_shows')}")
