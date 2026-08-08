@@ -705,13 +705,18 @@ class MultiTurnReactAgent(FnCallAgent):
                 "text": messages[-1]['content'],
                 "json": messages[-1]['content']
             }
+        # generate_longform_tasks.py always supplies a three-key dict here, but the
+        # three-agent chain injects no complexity axes at all, so it is None there.
+        # Joining unconditionally raised AttributeError at the very last step,
+        # after every tool call and token had already been paid for.
+        cc = getattr(self, 'complexity_class', None)
         result = {
             "question": question,
             "answer": answer,
             "messages": messages,
             "prediction": prediction,
             "termination": termination,
-            "complexity_class": "_".join(getattr(self, 'complexity_class', None).values()),
+            "complexity_class": "_".join(cc.values()) if isinstance(cc, dict) else (cc or "none"),
             "iteration_id": iteration_id,
             "subcategory": subcategory,
             "cost_info": total_cost_info.copy(),  # Record cumulative cost info

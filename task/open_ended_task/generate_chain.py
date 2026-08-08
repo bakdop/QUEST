@@ -36,6 +36,7 @@ import json
 import os
 import re
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 from generation_agent_longform import MultiTurnReactAgent
@@ -220,8 +221,21 @@ async def run_one(i, sem, args):
         # sampled input left, so its provenance has to be recoverable per row.
         seed = {"id": i + 1, "topic": topic, "main_category": main_category,
                 "keyword": keyword, "source_csv": DOMAIN_TO_CSV.get(topic)}
-        loop = asyncio.get_event_loop()
         print(f"[#{i+1}] {topic} / {keyword!r} (from {seed['source_csv']})")
+        try:
+            return await _chain(i, seed, topic, keyword, args)
+        except Exception as e:
+            # gather(return_exceptions=True) would otherwise swallow this into a
+            # count, and a whole run's worth of tool calls disappears with it.
+            append(args.failed, {**seed, "stage": "exception",
+                                 "error": f"{type(e).__name__}: {e}",
+                                 "traceback": traceback.format_exc()})
+            print(f"[#{i+1}] EXCEPTION {type(e).__name__}: {e}")
+            return None
+
+
+async def _chain(i, seed, topic, keyword, args):
+        loop = asyncio.get_event_loop()
 
         # ---- stage 1: explore --------------------------------------------
         r1 = await _stage(loop, EXPLORE_PROMPT, explore_user_content(topic, keyword),
