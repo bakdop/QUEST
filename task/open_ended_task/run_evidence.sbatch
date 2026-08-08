@@ -7,16 +7,21 @@
 #SBATCH --mem=400G
 #SBATCH --nodes=1
 #SBATCH --time=12:00:00
-#SBATCH --output=/scratch/bl4363/slurm_logs/quest-ev-%j.out
-#SBATCH --error=/scratch/bl4363/slurm_logs/quest-ev-%j.out
+#SBATCH --array=0-1
+#SBATCH --output=/scratch/bl4363/slurm_logs/quest-ev-%A_%a.out
+#SBATCH --error=/scratch/bl4363/slurm_logs/quest-ev-%A_%a.out
 
 # PROMPT_VARIANT=evidence_first: one ReAct loop per question, one kind of object.
 #
 #   NUM_ITERATIONS=512 WORKERS=32 sbatch task/open_ended_task/run_evidence.sbatch
 #
-# Two of these run side by side without trouble: the gpu48 QOS allows 24 GPUs per
-# user and each job takes 2, so submitting twice gives 512+512 in parallel. Give
-# them different RUN_TAGs or they write into the same directory.
+# A job array, so one submission is two parallel jobs of NUM_ITERATIONS each —
+# 512+512 by default. The gpu48 QOS allows 24 GPUs per user and each task takes
+# 2, so more is fine: `sbatch --array=0-3` gives four.
+#
+# Tasks may land on the same node, so the port and the tool caches are offset by
+# the array index; sharing either would have two servers fighting over :8000 and
+# two runs writing the same diskcache.
 #
 # Trajectories are written as each question finishes, so a walltime kill leaves
 # everything completed up to that point; re-run extract_evidence.py over the
@@ -27,7 +32,8 @@ set -euo pipefail
 REPO_ROOT="/scratch/bl4363/QUEST"
 MODEL_PATH="${MODEL_PATH:-/scratch/bl4363/models/Qwen3.5-122B-A10B}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3.5-122b}"
-PORT="${PORT:-8000}"
+TASK="${SLURM_ARRAY_TASK_ID:-0}"
+PORT="${PORT:-$((8000 + TASK * 100))}"
 TP_SIZE="${TP_SIZE:-2}"
 MAX_LEN="${MAX_LEN:-262144}"
 GPU_UTIL="${GPU_UTIL:-0.92}"
@@ -38,10 +44,16 @@ export WORKERS="${WORKERS:-32}"
 export PROMPT_VARIANT=evidence_first
 export FIXED_PAIRS_FILE="${FIXED_PAIRS_FILE:-}"
 
-RUN_TAG="${RUN_TAG:-ev${NUM_ITERATIONS}_${SLURM_JOB_ID:-manual}}"
+RUN_TAG="${RUN_TAG:-ev${NUM_ITERATIONS}_${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}}_${TASK}"
 export OUT_DIR="${REPO_ROOT}/outputs/${RUN_TAG}"
 export TRAJ_DIR="${OUT_DIR}/trajectories"
 mkdir -p "${TRAJ_DIR}" /scratch/bl4363/slurm_logs
+
+# separate tool caches per task — two runs on one node would otherwise write the
+# same diskcache files
+export VISIT_CACHE_FILE="${VISIT_CACHE_FILE:-${REPO_ROOT}/database/visit_${TASK}.db}"
+export SEARCH_CACHE_FILE="${SEARCH_CACHE_FILE:-${REPO_ROOT}/database/search_${TASK}.db}"
+mkdir -p "${REPO_ROOT}/database"
 
 export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/scratch/bl4363/vllm_cache}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/scratch/bl4363/.cache}"
@@ -58,6 +70,7 @@ export SAVE_TRAJ=true
 
 echo "=============================================================="
 echo "node        : $(hostname -f)"
+echo "array task  : ${TASK}  (port ${PORT})"
 echo "run tag     : ${RUN_TAG}"
 echo "questions   : ${NUM_ITERATIONS} (workers=${WORKERS}, port=${PORT})"
 echo "seeds       : ${FIXED_PAIRS_FILE:-<sampled at random>}"
