@@ -31,6 +31,63 @@ BLEED = ["structural", "aggregate", "affects the interpretation",
          "adjudicat", "normaliz", "trade-off analysis"]
 
 
+ASK_RE = re.compile(
+    r"\b(what|how|whether|which|why|when|should I|can you|please"
+    r"|I need to (?:know|understand)|I(?:'d| would) like to (?:know|understand)"
+    r"|I want to know)\b", re.I)
+
+# Words that open a sentence or are grammatically capitalised, so they say nothing
+# about whether the subject was actually pinned to a named thing.
+_NOT_A_SPECIFIC = {
+    "I", "The", "A", "An", "In", "What", "How", "Write", "Create", "Analyze",
+    "Analyse", "Using", "Include", "Your", "This", "It", "Also", "For", "As",
+    "My", "We", "Some", "Provide", "Compose", "Examine", "Explain", "Compare",
+    "Generate", "Find", "Help", "Propose", "Make", "Prove", "Critically",
+    "Develop", "Design", "Give", "Please", "Assume", "If", "When", "Based",
+    "Consider", "Start", "Then", "Add", "Use", "Each", "Do", "Be", "Focus",
+}
+
+
+def pinned_tokens(text):
+    """Named entities and years in a question - how hard its subject is pinned.
+
+    A question that names nothing specific cannot make a finding obligatory: any
+    competent essay on the general topic satisfies it. ResearchRubrics questions
+    carry a median of five.
+    """
+    toks = {t for t in re.findall(r"\b[A-Z][a-zA-Z0-9&.\-]{1,}\b", text or "")
+            if t not in _NOT_A_SPECIFIC}
+    return toks | set(re.findall(r"\b(?:19|20)\d{2}\b", text or ""))
+
+
+def arithmetic_errors(text, tol=0.02):
+    """Verify 'a / b = c' claims written into an analysis field.
+
+    A derivation whose sum is wrong has no value at all, and the grounding check
+    cannot see it: every figure involved is present in the corpus, only the
+    operation on them is wrong.
+
+    This catches miscomputation only. It does NOT catch the mispairing seen in
+    findings8_15267682, where "1,558/309 = 5.04" divides an unfunded-patent count
+    by a funded-publication count: the division is arithmetically correct, the
+    operands are the wrong two numbers. Nothing short of reading the observation
+    catches that.
+    """
+    bad = []
+    for m in re.finditer(r"([\d,]+(?:\.\d+)?)\s*/\s*([\d,]+(?:\.\d+)?)\s*=\s*([\d,]+(?:\.\d+)?)",
+                         text or ""):
+        try:
+            a, b, c = (float(g.replace(",", "")) for g in m.groups())
+        except ValueError:
+            continue
+        if b == 0:
+            continue
+        got = a / b
+        if abs(got - c) > max(tol * abs(c), tol):
+            bad.append(f"{m.group(0)} (actually {got:.2f})")
+    return bad
+
+
 def leak_tokens(claim):
     """Split into two buckets, because they mean different things.
 
@@ -225,8 +282,22 @@ def analyse(run):
         print(f"  has shallow_miss      {sum(1 for f in findings if f.get('shallow_miss'))}/{len(findings)}")
         if bad_ops:
             print(f"  INVALID operation     {dict(bad_ops)}")
+        arith = [(f.get("id", "?"), e)
+                 for f in findings for e in arithmetic_errors(f.get("analysis"))]
+        print(f"  ARITHMETIC errors     {len(arith)}"
+              f"{' (a/b=c checked in analysis)' if not arith else ''}")
+        for fid, e in arith[:8]:
+            print(f"    {fid}: {e}")
         restatement_report(findings)
         grounding_report(run, qa)
+
+    centres = [q.get("centre") for q in qa if isinstance(q.get("centre"), dict)]
+    if centres:
+        kept = sum(len(c.get("kept") or []) for c in centres)
+        disc = sum(len(c.get("discarded") or []) for c in centres)
+        none_disc = sum(1 for c in centres if not (c.get("discarded") or []))
+        print(f"\ncentre {len(centres)}/{len(qa)} recorded  kept {kept}  discarded {disc}"
+              f"  ({none_disc} questions discarded nothing)")
 
     ess = [e for q in qa for e in (q.get("essentials") or []) if isinstance(e, dict)]
     if ess:
@@ -241,11 +312,17 @@ def analyse(run):
         figs, names = set(), set()
         for f in (q.get("findings") or []):
             if isinstance(f, dict):
-                a, b = leak_tokens(f.get("conclusion") or f.get("claim") or "")
+                a, b = leak_tokens(" ".join(
+                    str(f.get(k) or "") for k in
+                    ("observation", "analysis", "conclusion", "claim", "derivation")))
                 figs |= a
                 names |= b
         prompt = norm(q.get("prompt"))
-        fhit = sorted({t for t in figs if norm(t) in prompt})
+        # "Aug. 18" in a finding and "august 18" in the question are the same
+        # leak; strip punctuation before comparing.
+        flat = re.sub(r"[.,$£€%]", "", prompt)
+        fhit = sorted({t for t in figs
+                       if norm(t) in prompt or re.sub(r"[.,$£€%]", "", norm(t)) in flat})
         nhit = sorted({t for t in names if norm(t) in prompt})
         per_q.append((q.get("id"), fhit, nhit))
         fig_q += bool(fhit)
@@ -262,6 +339,26 @@ def analyse(run):
     if words:
         print(f"\nquestion length  median {int(st.median(words))} words "
               f"(ResearchRubrics median 68)   range {min(words)}-{max(words)}")
+
+    # The first findings-first run wrote questions that asked for each finding
+    # separately - 7 asks against 3 kept findings - which hands the answerer a
+    # checklist without leaking a single figure. Ask density is what catches it.
+    asks = [len(ASK_RE.findall(q.get("prompt") or "")) for q in qa]
+    marks = [(q.get("prompt") or "").count("?") for q in qa]
+    if asks:
+        print(f"ask density      median {int(st.median(asks))} asks "
+              f"(ResearchRubrics median 1)   range {min(asks)}-{max(asks)}")
+        print(f"                 median {int(st.median(marks))} question marks "
+              f"(ResearchRubrics median 0)")
+        loud = [(q.get("id", i), a) for i, (q, a) in enumerate(zip(qa, asks)) if a > 3]
+        for qid, a in loud[:6]:
+            print(f"    id={qid}: {a} asks")
+
+    # A question that never pins its subject cannot make findings obligatory.
+    specifics = [len(pinned_tokens(q.get("prompt") or "")) for q in qa]
+    if specifics:
+        print(f"subject pinning  median {int(st.median(specifics))} named specifics "
+              f"(ResearchRubrics median 5)   range {min(specifics)}-{max(specifics)}")
     bleeds = Counter()
     for q in qa:
         for b in BLEED:

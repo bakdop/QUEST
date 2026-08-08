@@ -255,6 +255,13 @@ def render_findings(item):
     fs = item.get("findings")
     if not fs:
         return "(none recorded - write the rubric from the question alone)"
+    # STEP 5 discards the findings the question's centre does not need, but they
+    # stay in `findings` so the run can be analysed. Grading them would demand
+    # content the question never asks for, so drop them here.
+    centre = item.get("centre")
+    if isinstance(centre, dict) and isinstance(centre.get("kept"), list) and centre["kept"]:
+        kept = {str(i) for i in centre["kept"]}
+        fs = [f for f in fs if not isinstance(f, dict) or str(f.get("id", "")) in kept] or fs
     out = []
     for f in fs:
         if not isinstance(f, dict):
