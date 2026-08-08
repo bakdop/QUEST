@@ -8,15 +8,13 @@ the url that returned it — so the two things this has to do are shape it for t
 rubric generator and measure the investigation.
 
 MEASURE. Nothing is injected upstream, so every axis is counted here. Depth is
-the length of the `built_on` chain: how far reading had to go before the next
-thing to search for was known. Note this counts differently from
-extract_chain.py, which required a node to merge two parents before it deepened
-the chain. That rule existed to stop an inference ladder scoring as depth —
-`0F+2S -> 1F+1S -> 1F+1S` was one conclusion annotated three times. It does not
-apply here: a single-parent link means a round of reading determined a round of
-searching, and the statement at the end of it carries its own quote and url, so
-the chain cannot be padded without actually retrieving. The stricter count is
-still reported, as `chain_depth_merged`.
+read off `key_queries`, where each recorded search names the statements whose
+reading sent the run looking for it and the statements it produced: the chain is
+statement -> query -> statement, and its length is how far the investigation had
+to go. A single-parent step counts, unlike in extract_chain.py, where the merge
+requirement existed to stop an inference ladder scoring as depth. It does not
+apply here — every link is a retrieval carrying its own quote and url, so the
+chain cannot be padded without actually going and looking.
 
 SHAPE. longform_rubric/generate_criteria_findings.py reads `findings` with
 `conclusion` and `evidence[{url, quote}]`. Until it is rewritten to read
@@ -82,27 +80,48 @@ def rounds(traj):
     return s, v
 
 
-def chain_depth(stmts, require_merge=False):
-    """How far the investigation had to go.
+def parents_of(stmts, queries):
+    """statement id -> the statements whose reading sent the run looking for it.
 
-    A statement with no `built_on` is depth 1 — it was found without needing to
-    read anything first. Each link adds one. With require_merge, only a statement
-    resting on two or more others counts as a step, which is the count
-    extract_chain.py used for inference chains.
+    Read off `key_queries`, not off the statements. The relation the
+    investigation actually has is statement -> query -> statement: reading S5 and
+    S8 prompts a search, and that search returns S6. An earlier version asked each
+    statement for a `built_on` list and got the wrong thing — the run with the
+    strongest investigation left it empty on all nine statements, correctly, since
+    every statement was a direct retrieval and none was derived from another.
     """
-    smap = {s.get("id"): s for s in stmts if isinstance(s, dict) and s.get("id")}
-    if not smap:
+    ids = {s.get("id") for s in stmts if isinstance(s, dict)}
+    par = {}
+    for q in queries or []:
+        if not isinstance(q, dict):
+            continue
+        src = [f for f in (q.get("from") or []) if f in ids]
+        for y in (q.get("yielded") or []):
+            if y in ids:
+                par.setdefault(y, set()).update(src)
+    return par
+
+
+def chain_depth(stmts, queries):
+    """How far the investigation had to go before it could ask for this.
+
+    A statement nothing sent the run looking for is depth 1. Each link adds one.
+    Every link is a real retrieval carrying its own quote and url, so unlike an
+    inference chain it cannot be padded — which is why a single-parent step counts
+    here where extract_chain.py required a merge.
+    """
+    ids = [s.get("id") for s in stmts if isinstance(s, dict) and s.get("id")]
+    if not ids:
         return 0
+    par = parents_of(stmts, queries)
 
     def d(sid, seen=()):
-        if sid in seen or sid not in smap:
+        if sid in seen:
             return 0
-        parents = [p for p in (smap[sid].get("built_on") or []) if p in smap]
-        deeper = max([d(p, seen + (sid,)) for p in parents] or [0])
-        step = (1 if len(parents) >= 2 else 0) if require_merge else (1 if parents else 0)
-        return step + deeper
+        ps = [p for p in par.get(sid, ()) if p in ids]
+        return (1 if ps else 0) + max([d(p, seen + (sid,)) for p in ps] or [0])
 
-    return max(d(i) for i in smap) + 1
+    return max(d(i) for i in ids) + 1
 
 
 def to_legacy(stmts, kept):
@@ -121,7 +140,6 @@ def to_legacy(stmts, kept):
             "id": s.get("id"),
             "conclusion": s.get("claim"),
             "subtopic": s.get("subtopic"),
-            "built_on": s.get("built_on"),
             "evidence": [{"url": e.get("source"), "quote": e.get("quote"),
                           "contributes": s.get("claim")} for e in ev],
         })
@@ -138,10 +156,16 @@ def signals(p, stmts, subs, traj):
     centre = p.get("centre") or {}
     ids = {s.get("id") for s in stmts}
     s_rounds, v_rounds = rounds(traj)
-    built = [s for s in stmts if s.get("built_on")]
+    kq = [q for q in (p.get("key_queries") or []) if isinstance(q, dict)]
+    carried = [q for q in kq if q.get("from")]
+    reached = {y for q in kq for y in (q.get("yielded") or []) if y in ids}
+    named = {i for q in kq for i in (q.get("from") or []) + (q.get("yielded") or [])}
     return {
-        "built_on_share": round(len(built) / len(stmts), 3) if stmts else 0.0,
-        "chain_depth_merged": chain_depth(stmts, require_merge=True),
+        # what share of the recorded searches came out of something already read
+        "carried_query_share": round(len(carried) / len(kq), 3) if kq else 0.0,
+        # what share of statements a recorded search claims to have produced
+        "reached_by_query_share": round(len(reached) / len(stmts), 3) if stmts else 0.0,
+        "n_key_queries": len(kq),
         "statements_per_subtopic": {"median": st.median(counts) if counts else 0,
                                     "min": min(counts) if counts else 0,
                                     "empty": sum(1 for c in counts if c == 0)},
@@ -151,11 +175,9 @@ def signals(p, stmts, subs, traj):
         "no_evidence": [s.get("id") for s in stmts if not (s.get("evidence") or [])],
         "statements_off_map": [s.get("id") for s in stmts
                                if norm(s.get("subtopic")) not in handles],
-        "dangling_built_on": sorted({p_ for s in stmts
-                                     for p_ in (s.get("built_on") or []) if p_ not in ids}),
+        "dangling_query_ids": sorted(named - ids),
         "kept": len(centre.get("kept") or []),
         "discarded": len(centre.get("discarded") or []),
-        "n_key_queries": len(p.get("key_queries") or []),
         "searches": s_rounds, "visits": v_rounds,
     }
 
@@ -180,7 +202,7 @@ def main():
         kept = {i for i in ((p.get("centre") or {}).get("kept") or [])}
 
         n_sub, n_st = len(subs), len(stmts)
-        depth = chain_depth(stmts)
+        depth = chain_depth(stmts, p.get("key_queries"))
         implicit = sum(1 for s in subs if str(s.get("exposure")).lower() == "implicit")
         share = implicit / n_sub if n_sub else 0.0
         out.append({
@@ -231,8 +253,10 @@ def main():
           f"   (propose baseline: 4)")
     per = [r['_signals']['statements_per_subtopic']['median'] for r in out]
     print(f"  statements/sub   median {st.median(per)}   (propose baseline: 2)")
-    print(f"  built_on share   median {med(lambda r: r['_signals']['built_on_share'])}"
-          f"   (no baseline — this is the new one)")
+    print(f"  carried queries  median {med(lambda r: r['_signals']['carried_query_share'])}"
+          f"   <- searches that came out of something already read")
+    print(f"  reached by query median {med(lambda r: r['_signals']['reached_by_query_share'])}"
+          f"   <- statements a recorded search produced")
     print(f"  chain depth      median {med(lambda r: r['_axes']['logical_nesting'])}"
           f"   (>=2 in {sum(1 for r in out if r['_axes']['logical_nesting'] >= 2)}/{len(out)})")
     print(f"  implicit share   median {med(lambda r: r['_axes']['exploration'])}")
@@ -240,7 +264,7 @@ def main():
           f" / {med(lambda r: r['_signals']['visits'])}")
     for k, label in (("no_evidence", "statements with no evidence"),
                      ("statements_off_map", "statements off the subtopic list"),
-                     ("dangling_built_on", "built_on ids that do not exist")):
+                     ("dangling_query_ids", "key_queries ids that do not exist")):
         n = sum(len(r["_signals"][k]) for r in out)
         if n:
             rows = sum(1 for r in out if r["_signals"][k])

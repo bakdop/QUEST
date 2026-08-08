@@ -2,11 +2,12 @@
 
     python analyze_interleave.py --input_dir outputs/<tag>/trajectories
 
-`built_on` is a retrospective self-report: the model reconstructs, while writing
-the answer, which statement sent it looking for which. That is the same class of
-field as `centre.discarded` (empty in 8 of 8 runs) and the complexity axes (the
-self-reported value did not match the sampled one). A low `built_on` share is
-therefore ambiguous on its own, and this script exists to disambiguate it.
+`key_queries` is a retrospective self-report: the model reconstructs, while
+writing the answer, which reading sent it looking for what. That is the same class
+of field as `centre.discarded` (empty in 8 of 8 runs) and the complexity axes (the
+self-reported value did not match the sampled one), so a low carried-query share
+is ambiguous on its own and this script exists to disambiguate it — it counts the
+interleave off the trajectory, where the model has no say.
 
 The trajectory has the real sequence — which round issued which query, and which
 round first returned each url — so the interleave can be counted rather than
@@ -19,17 +20,17 @@ asked for:
                     round's tool output and is not in the topic or keyword —
                     a query that could only have been written after reading.
 
-Read against the model's own `built_on` share, the two numbers separate the
-cases:
+Read against what the run recorded in `key_queries`, the two separate the cases:
 
-  interleave high, built_on low   the behaviour is there and the annotation is
-                                  not. Fix the recording, or stop asking and use
-                                  this measurement instead.
-  both low                        the behaviour is not there. A prompt change is
-                                  the wrong first move — this project has tied on
-                                  six of them.
-  interleave low, few rounds      the run stopped early; look at why before
-                                  reading anything into the depth.
+  interleave high, record thin   the behaviour is there and the annotation is
+                                 not. That was the diagnosis on the first five
+                                 runs, where the strongest investigation of the
+                                 five annotated none of it.
+  both low                       the behaviour is not there. A prompt change is
+                                 the wrong first move — this project has tied on
+                                 six of them.
+  interleave low, few rounds     the run stopped early; look at why before
+                                 reading anything into the depth.
 """
 import argparse
 import json
@@ -100,7 +101,8 @@ def analyse(traj, pred):
     for i, (_, resp) in enumerate(rs):
         if any(u and u in resp for u in srcs):
             src_rounds.add(i + 1)
-    built = sum(1 for s in stmts if s.get("built_on"))
+    kq = [q for q in (pred.get("key_queries") or []) if isinstance(q, dict)]
+    recorded = sum(1 for q in kq if q.get("from"))
     return {
         "rounds": len(rs),
         "queries": total_q,
@@ -108,8 +110,8 @@ def analyse(traj, pred):
         "carried_share": round(carried / total_q, 2) if total_q else 0.0,
         "source_rounds": len(src_rounds),
         "statements": len(stmts),
-        "built_on": built,
-        "built_on_share": round(built / len(stmts), 2) if stmts else 0.0,
+        "recorded": recorded,
+        "recorded_share": round(recorded / len(kq), 2) if kq else 0.0,
     }
 
 
@@ -133,11 +135,11 @@ def main():
         return
 
     print(f"{'file':<34} {'rnds':>4} {'qs':>4} {'carried':>8} {'srcR':>5} "
-          f"{'stmts':>6} {'built_on':>9}")
+          f"{'stmts':>6} {'recorded':>9}")
     for f, a in rows:
         print(f"{f[:34]:<34} {a['rounds']:>4} {a['queries']:>4} "
               f"{a['carried_queries']:>3}/{a['carried_share']:<4} {a['source_rounds']:>5} "
-              f"{a['statements']:>6} {a['built_on']:>4}/{a['built_on_share']:<4}")
+              f"{a['statements']:>6} {a['recorded']:>4}/{a['recorded_share']:<4}")
 
     def med(k):
         return st.median([a[k] for _, a in rows])
@@ -148,12 +150,12 @@ def main():
           f"   <- retrieval driven by what was read")
     print(f"  rounds that fed a cited source  {med('source_rounds')}"
           f"   (1 = everything from one sweep)")
-    print(f"  built_on share        {med('built_on_share')}   <- the model's own account")
+    print(f"  recorded carried      {med('recorded_share')}   <- the model's own account")
 
     flat = sum(1 for _, a in rows if a["source_rounds"] <= 1)
-    gap = sum(1 for _, a in rows if a["carried_share"] >= 0.4 and a["built_on_share"] < 0.2)
+    gap = sum(1 for _, a in rows if a["carried_share"] >= 0.4 and a["recorded_share"] < 0.2)
     print(f"\n  {flat}/{len(rows)} drew every cited source from a single round")
-    print(f"  {gap}/{len(rows)} carried queries but recorded almost no built_on"
+    print(f"  {gap}/{len(rows)} carried queries but recorded almost none of it"
           f"   <- annotation gap, not behaviour")
 
 

@@ -19,10 +19,21 @@ The real reason: analysis is not the product. It is what tells the model where t
 search next. At every step a reasoning sub-step interprets the evidence so far
 and identifies what is still missing, and a retrieval sub-step acquires the next
 piece; what gets read reshapes the plan, and the plan determines the next query.
-Analysis being instrumental, it has no field of its own. It leaves exactly two
-traces, and both can be checked: `built_on`, which records that a statement was
-retrieved because of what earlier ones said, and the subtopic list, which changes
-as the investigation runs.
+Analysis being instrumental, it has no field of its own. It leaves two traces:
+`key_queries`, where a search names the statements that sent the model looking for
+it and the statements it produced, and the subtopic list, which changes as the
+investigation runs.
+
+That first trace started life as `built_on` on each statement, and reading the
+first five runs showed it was modelling the wrong relation. The run with by far
+the strongest investigation — eleven rounds on the October 2025 AWS outage,
+ending with a query that could only be written after reading both the SLA credit
+terms and the $38M-$581M loss estimates — recorded `built_on` on none of its nine
+statements, correctly: every statement was a direct retrieval, so none was built
+on another. The run that filled the field most (4 of 6) used it for adjacency,
+linking "DWTS uses live covers because licensing is cheaper" to "DWTS uses live
+covers performed by their in-house band". The chain is statement -> query ->
+statement, and it lives at the query.
 
 So there is one kind of object, a statement, and every one of them carries a
 verbatim quote and the url that returned it. Depth is no longer how far a chain
@@ -106,6 +117,11 @@ After each round, ask what the evidence now establishes, what a good answer to
 this topic still needs settled, and whether this is still the topic worth
 answering. Any of the three can set the next query.
 
+Keep a record of the searches that changed where you went next — the handful that
+moved things, not every call you made. For each, note what you had just read that
+sent you there, which statements that reading came from, and which statements the
+search produced. An opening search has nothing behind it and says so.
+
 ================================
 SUBTOPICS — THE PLAN
 ================================
@@ -161,10 +177,9 @@ are what make it a claim rather than a gloss:
 
 Both say the same thing. Only the second could appear in a report.
 
-When you went looking for something because of what earlier statements said, name
-those statements in `built_on`. Reading across what you have and arriving at a
-conclusion is not itself a result: go and search it, and record what comes back.
-**A statement is something a source said, never something you worked out.**
+Reading across what you have and arriving at a conclusion is not itself a result:
+go and search it, and record what comes back. A statement is something a source
+said, never something you worked out.
 
 Record everything that comes back, not only what you expect to use.
 
@@ -295,27 +310,29 @@ closing tag, then STOP.
   "statements": [
     {"id": "S1", "claim": "one claim, plainly put, in your own words",
      "subtopic": "the handle of the subtopic it sits in",
-     "evidence": [{"quote": "verbatim from a tool response", "source": "https://..."}],
-     "built_on": ["S3"]}
+     "evidence": [{"quote": "verbatim from a tool response", "source": "https://..."}]}
   ],
   "centre": {"kept": ["S1", "S3"], "discarded": ["S9"],
              "discard_reason": "why each discarded id was dropped"},
   "proposed_question": "the question, as a plain string",
   "key_queries": [
-    {"query": "a search that moved the investigation",
-     "prompted_by": "what you had read that made this the next thing to look for"}
+    {"queries": ["every query you sent in that one search call"],
+     "why": "what you had just read that made this the next thing to look for",
+     "from": ["S5", "S8"],
+     "yielded": ["S6"]}
   ]
 }
 </answer>
 
-`built_on` is omitted when a statement did not come out of an earlier one.
-`key_queries` holds the handful of searches that changed where you went next, not
-every call you made.
+One entry in `key_queries` is one search: `queries` holds all the strings you sent
+in it, `why` says what you had just read that sent you there, `from` names the
+statements that reading came from and is empty for an opening search, and
+`yielded` names the statements the search produced.
 
 It must satisfy: at least two subtopics, and every statement's `subtopic` is one
 of their handles; every statement has evidence, every quote verbatim from a tool
 response and every source a url that came back from one; no two statements making
-the same claim; every id named in `built_on` or in `centre` existing.
+the same claim; every id named in `key_queries` or in `centre` existing.
 
 Check it parses before emitting: strings quoted and escaped, lists closed, no
 trailing commas.
