@@ -49,6 +49,143 @@ def norm(s):
     return re.sub(r"\s+", " ", (s or "")).strip().lower()
 
 
+# ---------------------------------------------------------------- question ---
+STOP = set("the a an of to in for and or is are was were be been on at by with that "
+           "this it its as from than more most less not no you your which what how "
+           "when where why who vs about into over under between across per new".split())
+
+
+def content_words(s):
+    return {w.rstrip("s") for w in re.findall(r"[a-z0-9]+", norm(s))
+            if w not in STOP and len(w) > 2}
+
+
+def leak_tokens(claim):
+    """Figures and proper nouns in a claim, as two buckets.
+
+    Lifted from analyze_run.py, which is imported by nothing. A figure or date
+    turning up in the question is unambiguous leakage — the asker could not have
+    known it. A proper noun is weaker: the subject of a question about SpaceX
+    necessarily appears in its statements too. `or ""` added because the original
+    took its argument raw and `to_legacy` can hand it a None claim.
+    """
+    claim = claim or ""
+    figures, names = set(), set()
+    for m in re.finditer(r'\b\d[\d,]*\.?\d*\s*%|\b(?:19|20)\d{2}\b|[$£€]\s?[\d,]+(?:\.\d+)?'
+                         r'|\b\d[\d,]*\.?\d*\s*(?:million|billion|percent)\b', claim):
+        figures.add(m.group(0).strip())
+    for m in re.finditer(r'\b([A-Z][A-Za-z0-9&.\-]{2,}(?:\s+[A-Z][A-Za-z0-9&.\-]+){0,3})\b', claim):
+        w = m.group(1).strip()
+        if w.lower() not in {"the", "this", "these", "that"} and len(w) > 3:
+            names.add(w)
+    return figures, names
+
+
+def coordinate_asks(q):
+    """Coordinate asks in a question — the checklist shape.
+
+    From extract_propose.py. A question that hands over its own contents does it
+    as a run of commas and `and`s after `including` / `examining` / `accounting
+    for`.
+    """
+    q = q or ""
+    n = 1 + len(re.findall(r"\(\s*\d\s*\)|\b\d\.\s+[A-Z]", q))
+    for m in re.finditer(r"\b(including|accounting for|addressing|covering|analyz\w+|"
+                         r"examining|considering|compare|comparing)\b(.{0,400})", q, re.I):
+        cut = re.split(r"(?<=[.;])\s", m.group(2))[0]
+        n += cut.count(",") + len(re.findall(r"\band\b", cut, re.I))
+    return n
+
+
+# Ways a ResearchRubrics question narrows without naming what the answer must
+# contain. 33 of its 101 questions open in first person or a persona, and the
+# third-person ones still carry an audience, a length or an exclusion.
+SITUATED = (
+    (r"\b(i|i'm|i am|i've|i need|i want|my|we|we're|our)\b", "asker"),
+    (r"\b(act as|pretend (that )?you|you are a|assume you are|imagine (that )?you)\b", "persona"),
+    (r"\b(audience|for readers|for a reader|assume the reader|accessible to|"
+     r"not familiar with|unfamiliar with|for a graduate|for a seminar)\b", "audience"),
+    (r"\b(less than|no more than|under|at most|keep (it|your answer)|word|page)s?\s*\d",
+     "length"),
+    (r"\b(talk less about|focus less on|leave out|do not (cover|discuss)|"
+     r"rather than the|not just the)\b", "exclusion"),
+)
+
+
+def situated(q):
+    return [name for pat, name in SITUATED if re.search(pat, q or "", re.I)]
+
+
+def question_signals(q, subs, stmts):
+    """Is the question a contents list of its own subtopics?"""
+    qw = content_words(q)
+    named, disagree = [], []
+    for s in subs:
+        hw = content_words(s.get("handle"))
+        if hw and len(hw & qw) / len(hw) >= 0.5:
+            named.append(s.get("handle"))
+            if str(s.get("exposure")).lower() == "implicit":
+                disagree.append(s.get("handle"))
+    figs = set()
+    for s in stmts:
+        surface = " ".join([str(s.get("claim") or ""), str(s.get("subtopic") or "")]
+                           + [str(e.get("quote") or "") for e in (s.get("evidence") or [])
+                              if isinstance(e, dict)])
+        figs |= leak_tokens(surface)[0]
+    qn = norm(q)
+    flat = re.sub(r"[.,$£€%]", "", qn)
+    leaked = sorted({t for t in figs
+                     if norm(t) in qn or re.sub(r"[.,$£€%]", "", norm(t)) in flat})
+    return {
+        "subtopics_named_in_question": named,
+        "exposure_disagreement": disagree,
+        "leaked_figures": leaked,
+        "coordinate_asks": coordinate_asks(q),
+        "situated": situated(q),
+        "question_words": len((q or "").split()),
+    }
+
+
+# ------------------------------------------------------------------ sources ---
+# Descriptive only — never a gate. A Reddit thread is the right source for
+# "audience reactions were mixed" and the wrong one for "the show uses an
+# in-house band"; whether a source fits its claim is a judgement, so this only
+# says which statements are worth reading.
+#
+# Matched on the host, not by substring. Substring matching put AWS's own
+# post-mortem at aws.amazon.com into `commerce` (it contains "amazon.") and
+# nytix.com into `ugc` (it contains "x.com"). UGC matches subdomains too, since
+# old.reddit.com is still Reddit; commerce does not, since aws.amazon.com is not
+# a shop.
+UGC = {"reddit.com", "linkedin.com", "x.com", "twitter.com", "facebook.com",
+       "instagram.com", "quora.com", "medium.com", "substack.com", "tiktok.com",
+       "youtube.com", "pinterest.com"}
+COMMERCE = {"amazon.com", "target.com", "walmart.com", "goodreads.com", "ebay.com",
+            "etsy.com", "bestbuy.com"}
+PRIMARY = {"doi.org", "pubmed.ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov",
+           "ncbi.nlm.nih.gov", "arxiv.org", "sec.gov", "ssrn.com", "jstor.org"}
+OFFICIAL = {"europa.eu", "who.int", "oecd.org", "imf.org", "worldbank.org",
+            "iso.org", "ietf.org", "un.org"}
+
+
+def _under(host, domains):
+    return any(host == d or host.endswith("." + d) for d in domains)
+
+
+def tier(dom):
+    host = (dom or "").lower().lstrip(".")
+    if _under(host, PRIMARY):
+        return "primary"
+    if host.endswith((".gov", ".edu", ".int", ".mil")) or ".gov." in host \
+            or ".edu." in host or _under(host, OFFICIAL):
+        return "official"
+    if _under(host, UGC):
+        return "ugc"
+    if host in COMMERCE:
+        return "commerce"
+    return "other"
+
+
 def keyword_of(traj):
     for m in traj.get("messages", []):
         if m.get("role") != "user":
@@ -176,6 +313,13 @@ def signals(p, stmts, subs, traj):
         "statements_off_map": [s.get("id") for s in stmts
                                if norm(s.get("subtopic")) not in handles],
         "dangling_query_ids": sorted(named - ids),
+        "source_tiers": Counter(tier(d) for d in doms),
+        # statements whose every source is user-generated — the batch to read
+        "ugc_only": [s.get("id") for s in stmts
+                     if (s.get("evidence") or [])
+                     and all(tier(urlparse(e.get("source") or "").netloc.replace("www.", ""))
+                             == "ugc"
+                             for e in (s.get("evidence") or []) if isinstance(e, dict))],
         "kept": len(centre.get("kept") or []),
         "discarded": len(centre.get("discarded") or []),
         "searches": s_rounds, "visits": v_rounds,
@@ -228,7 +372,8 @@ def main():
                 "exploration_band": ("Low" if share < 1 / 3 else
                                      "Medium" if share <= 2 / 3 else "High"),
             },
-            "_signals": signals(p, stmts, subs, traj),
+            "_signals": {**signals(p, stmts, subs, traj),
+                         **question_signals(p["proposed_question"], subs, stmts)},
         })
 
     with open(args.output_file, "w") as fh:
@@ -260,11 +405,31 @@ def main():
     print(f"  chain depth      median {med(lambda r: r['_axes']['logical_nesting'])}"
           f"   (>=2 in {sum(1 for r in out if r['_axes']['logical_nesting'] >= 2)}/{len(out)})")
     print(f"  implicit share   median {med(lambda r: r['_axes']['exploration'])}")
+    print(f"  question words   median {med(lambda r: r['_signals']['question_words'])}"
+          f"   (ResearchRubrics median: 68)")
+    print(f"  coordinate asks  median {med(lambda r: r['_signals']['coordinate_asks'])}"
+          f"   (ResearchRubrics ask density median: 1)")
+    sit = sum(1 for r in out if r['_signals']['situated'])
+    print(f"  situated         {sit}/{len(out)}"
+          f"   (ResearchRubrics: 33/101 open in first person or a persona)")
+    named = sum(len(r['_signals']['subtopics_named_in_question']) for r in out)
+    dis = sum(len(r['_signals']['exposure_disagreement']) for r in out)
+    subs_n = sum(r['_axes']['conceptual_breadth'] for r in out)
+    print(f"  subtopics named in the question   {named}/{subs_n}"
+          f"   of which marked implicit: {dis}")
+    tiers = Counter()
+    for r in out:
+        tiers.update(r['_signals']['source_tiers'])
+    print(f"  source tiers     {dict(tiers)}")
+    ugc = sum(len(r['_signals']['ugc_only']) for r in out)
+    if ugc:
+        print(f"  ! {ugc} statements sourced only from user-generated pages — read these")
     print(f"  searches/visits  median {med(lambda r: r['_signals']['searches'])}"
           f" / {med(lambda r: r['_signals']['visits'])}")
     for k, label in (("no_evidence", "statements with no evidence"),
                      ("statements_off_map", "statements off the subtopic list"),
-                     ("dangling_query_ids", "key_queries ids that do not exist")):
+                     ("dangling_query_ids", "key_queries ids that do not exist"),
+                     ("leaked_figures", "figures from a statement restated in the question")):
         n = sum(len(r["_signals"][k]) for r in out)
         if n:
             rows = sum(1 for r in out if r["_signals"][k])

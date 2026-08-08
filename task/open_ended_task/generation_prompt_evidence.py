@@ -87,9 +87,6 @@ the same answer, a competent response is just relay.
     impact favour the market, and access cuts against it for exactly the
     households it would help most.
 
-Prefer sources carrying primary material — studies, filings, official
-documentation, datasets, regulator or standards text — over pages that summarise
-other pages.
 
 ================================
 INVESTIGATE
@@ -183,6 +180,10 @@ said, never something you worked out.
 
 Record everything that comes back, not only what you expect to use.
 
+Prefer sources carrying primary material — studies, filings, official
+documentation, datasets, regulator or standards text — over pages that summarise
+other pages.
+
 ================================
 WRITE THE QUESTION
 ================================
@@ -191,22 +192,6 @@ Write it the way a real user would ask: a short, high-level request of one to
 three sentences, with a definite subject and a definite thing to decide. It must
 be OPEN-ENDED — answering it takes an evidence-backed, long-form report, not a
 lookup and not a list.
-
-THE SPINE IS THE FLOOR. The question is never vaguer than the spine you arrived
-at. That spine names a deliverable and a subject; the question keeps both and
-pins them down further.
-
-    Spine     an analysis of the streaming video industry's economic
-              transformation, examining how content spending, pricing and
-              consumer behaviour interact in 2025-26
-    Too vague What's actually happening in the streaming industry right now?
-    Open      Analyse how the economics of streaming video changed through
-              2025-26 and what that has done to where the industry's money
-              comes from.
-
-The vague version gave up the deliverable, the period and the economic frame, so
-nothing in the research follows from it. The third gives up none of them and is
-still wide open.
 
 THE QUESTION AND THE MATERIAL HAVE TO FIT EACH OTHER, and getting there means
 adjusting both.
@@ -234,8 +219,14 @@ not, the question is too loose for it — or it should not be kept. Does the
 question already say it? Then the question has done the work the answer was
 supposed to do.
 
-You move the question either way by saying more or less about the asker's
-situation, constraints and goal — never by saying more or less about the answer.
+You can also narrow a question by saying more about the situation it comes out
+of — who is asking and what they are deciding, who the answer is for, how long it
+should be, what is already settled, what to leave out. For example, "I'm a remote
+software engineer in SF making $120k and it's getting too expensive — rank three
+US cities I could move to, with cost of living at least 30% lower and somewhere I
+won't need a car" rules out most answers without naming one thing the answer has
+to say.
+
 When a question feels too easy, make its subject narrower rather than adding more
 to it.
 
