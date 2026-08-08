@@ -37,6 +37,11 @@ elif PROMPT_VARIANT == 'investigate':
     # spine and statements/findings merged into one ReAct loop — see
     # generation_prompt_investigate.py for why the split was dropped
     from generation_prompt_investigate import build_system_prompt
+elif PROMPT_VARIANT == 'explore':
+    # STAGE 1 of the three-agent chain, driven by generate_chain.py. Stages 2 and
+    # 3 pass their prompts in through data['system_prompt'] rather than through
+    # this table, so only stage 1 needs an entry here.
+    from generation_prompt_explore import build_system_prompt
 import time
 import asyncio
 from litellm import completion
@@ -401,7 +406,7 @@ class MultiTurnReactAgent(FnCallAgent):
         if sampled_keywords and not override_uc:
             keywords_str = ", ".join(sampled_keywords)
             user_content += f"\n\nInitial Keyword: {keywords_str}"
-            if PROMPT_VARIANT in ('spine', 'investigate', 'propose'):
+            if PROMPT_VARIANT in ('spine', 'investigate', 'propose', 'explore'):
                 user_content += "\n\nNote: the keyword above is a starting point sampled from a trending-search list, not a requirement. Search wide around it first, then report in `keyword_verdict` what you did with it."
             else:
                 user_content += "\n\nNote: You have been provided with 1 initial keyword above. In STEP 1 — Brainstorm Topic, you should use these as a starting point and brainstorm a research topic that needs multi-step reasoning, cross-document synthesis, and the generation of evidence-backed, long-form answers yourself."
@@ -409,13 +414,29 @@ class MultiTurnReactAgent(FnCallAgent):
         analysis_load = data.get('analysis_load')
         self.analysis_load = analysis_load
 
-        # STAGE 1 gets no complexity axes. In findings8_15312041 every run
-        # recited them in round 1 and chose a subject to satisfy them before any
-        # search, and recited them again at the end to decide how many findings
-        # to write (#3 wrote "Analysis Load: Medium (need 1-2 findings)" then
-        # produced 3). Both effects are premature commitment; the axes belong to
-        # the stage that writes the question, not the one that explores.
-        if PROMPT_VARIANT != 'spine' and not override_uc:
+        # No complexity axes for the split pipelines. The old reason was
+        # premature commitment: in findings8_15312041 every run recited the axes
+        # in round 1 and chose a subject to satisfy them before any search, then
+        # recited them again at the end to decide how many findings to write (#3
+        # wrote "Analysis Load: Medium (need 1-2 findings)" then produced 3).
+        #
+        # propose512_15497121 measured what the injection actually bought, by
+        # recovering the sampled level from the trajectory filename rather than
+        # trusting the model's self-report:
+        #
+        #   Conceptual Breadth  Simple -> 2 subtopics in all 18 runs (range 2-3)
+        #                       Moderate -> 4-5.  Total control — but by
+        #                       truncation, which is the opposite of the
+        #                       exhaustive map the chain now wants.
+        #   Logical Nesting     Shallow/Intermediate/Deep -> synthesis depth
+        #                       1-2 in every band, fully overlapping. Bought
+        #                       nothing.
+        #
+        # So the three-agent chain injects none of the four and measures all of
+        # them afterwards in extract_chain.py. `explore` is named here because it
+        # is dispatched by variant; stages 2 and 3 arrive with user_content set
+        # and are covered by the second clause.
+        if PROMPT_VARIANT not in ('spine', 'explore') and not override_uc:
             if complexity_class:
                 complexity_instruction = f"\n\nIMPORTANT: You must generate a task with complexity class {complexity_class}.\n"
                 user_content += complexity_instruction

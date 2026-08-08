@@ -189,7 +189,20 @@ def sample_analysis_load(lock):
         levels = list(ANALYSIS_LOAD_WEIGHTS)
         return random.choices(levels, weights=[ANALYSIS_LOAD_WEIGHTS[k] for k in levels])[0]
 
-# Mapping from Domain to CSV files
+# Mapping from Domain to CSV files.
+#
+# Six subcategories used to draw from entertainment.csv, and in findings8_15312041
+# the four questions seeded out of that pool were exactly the four worst
+# (p~=1.4%). That mattered less when the four complexity axes were also being
+# sampled; with those gone, keyword x topic is the only sampled input left and
+# the pool a seed comes from is the whole of the diversity story. Two of the six
+# move out to pools that were sitting unused:
+#
+#   General Info.       -> other.csv           (1342 keywords, previously unread)
+#   Ticketed Activities -> hobbies_leisure.csv (2118, leisure rather than media)
+#
+# climate.csv (494) and autos_vehicles.csv (28) are still unmapped; they need a
+# subcategory in category_structure to hang off, which is a separate change.
 DOMAIN_TO_CSV = {
     # Lifestyle & Leisure
     "Shopping": "shopping.csv",
@@ -206,8 +219,8 @@ DOMAIN_TO_CSV = {
     "Music": "entertainment.csv",
     "Books & Reading": "entertainment.csv",
     # Misc.
-    "General Info.": "entertainment.csv",  
-    "News": "politics.csv",  
+    "General Info.": "other.csv",
+    "News": "politics.csv",
     "Legal & Government Services": "law_government.csv",
     "Real Estate": "business_finance.csv",  
     "Finance & Investment": "business_finance.csv",
@@ -220,7 +233,7 @@ DOMAIN_TO_CSV = {
     # Travel & Transportation
     "Travel & Accommodation": "travel_transportation.csv",
     "Outdoor & Recreation": "travel_transportation.csv",
-    "Ticketed Activities": "entertainment.csv",  
+    "Ticketed Activities": "hobbies_leisure.csv",
 }
 
 TRENDING_KEYWORDS_DIR = "../trending_keywords/merge_keywords"
