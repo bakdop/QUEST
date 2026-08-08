@@ -225,6 +225,34 @@ DOMAIN_TO_CSV = {
 
 TRENDING_KEYWORDS_DIR = "../trending_keywords/merge_keywords"
 
+_FIXED_PAIRS = None
+
+
+def load_fixed_pairs():
+    """[{topic, keyword}, ...] from FIXED_PAIRS_FILE, or None when unset.
+
+    Iteration i takes pair i, so NUM_ITERATIONS should equal the file's length
+    (a longer run wraps around and repeats seeds).
+    """
+    global _FIXED_PAIRS
+    if _FIXED_PAIRS is None:
+        path = os.environ.get("FIXED_PAIRS_FILE", "").strip()
+        if not path:
+            _FIXED_PAIRS = []
+        else:
+            with open(path) as f:
+                _FIXED_PAIRS = [json.loads(l) for l in f if l.strip()]
+            print(f"FIXED_PAIRS_FILE={path}: {len(_FIXED_PAIRS)} pinned (topic, keyword) pairs")
+    return _FIXED_PAIRS or None
+
+
+def find_main_category(category_structure, subcategory):
+    for main, subs in category_structure.items():
+        if subcategory in subs:
+            return main
+    raise KeyError(f"subcategory {subcategory!r} is not in category_structure")
+
+
 def sample_keywords_from_csv(domain, num_keywords=10):
     """
     Read corresponding CSV file from trending_keywords directory based on domain,
@@ -330,11 +358,23 @@ async def run_single_iteration(iteration_id, subcategory_counts,
     """
     try:
         async with semaphore:
-            # Sample a subcategory based on weights (thread-safe)
-            main_category, random_question = sample_subcategory_with_weights(
-                category_structure, subcategory_counts, subcategory_lock
-            )
-            
+            # FIXED_PAIRS_FILE pins (topic, keyword) instead of sampling them, so a
+            # run can be repeated over the *same* seeds as an earlier one. Needed
+            # because keyword x topic turns out to dominate question quality: in
+            # findings8_15312041 the four tasks drawn from the shared
+            # entertainment.csv pool were exactly the bottom four by quality, so
+            # comparing prompts across differently-sampled keywords compares noise.
+            fixed = load_fixed_pairs()
+            if fixed:
+                pair = fixed[iteration_id % len(fixed)]
+                random_question = pair["topic"]
+                main_category = find_main_category(category_structure, random_question)
+            else:
+                # Sample a subcategory based on weights (thread-safe)
+                main_category, random_question = sample_subcategory_with_weights(
+                    category_structure, subcategory_counts, subcategory_lock
+                )
+
             # Sample a complexity class based on weights (thread-safe)
             complexity_class = sample_complexity_class_with_weights(
                 complexity_classes, complexity_lock
@@ -358,7 +398,10 @@ async def run_single_iteration(iteration_id, subcategory_counts,
             print(f"This subcategory has been sampled {current_subcategory_count} times")
             
             # Randomly sample 1 keyword from trending_keywords
-            sampled_keywords = sample_keywords_from_csv(random_question, num_keywords=1)
+            if fixed:
+                sampled_keywords = [fixed[iteration_id % len(fixed)]["keyword"]]
+            else:
+                sampled_keywords = sample_keywords_from_csv(random_question, num_keywords=1)
             print(f"Sampled keywords ({len(sampled_keywords)}): {sampled_keywords}")
             
             # Create independent agent instance for each task (avoid multi-threading conflicts)

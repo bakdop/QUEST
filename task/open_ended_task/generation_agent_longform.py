@@ -20,8 +20,23 @@ from generation_prompt_longform import *
 # for structure in the corpus before writing a question. Same agent loop and tools;
 # only build_system_prompt() differs, so both variants can be run over the same
 # keywords and compared directly.
-if os.getenv('PROMPT_VARIANT', 'default') == 'findings':
+# PROMPT_VARIANT=spine runs STAGE 1 of the split pipeline instead: wide search
+# then a spine carrying an evidenced tension, with no question and no findings.
+# It is deliberately NOT given the four complexity axes — reading the
+# findings8_15312041 trajectories showed the axes are what makes the model
+# commit to a subject in round 1, before any evidence exists.
+PROMPT_VARIANT = os.getenv('PROMPT_VARIANT', 'default')
+if PROMPT_VARIANT == 'findings':
     from generation_prompt_findings import build_system_prompt
+elif PROMPT_VARIANT == 'spine':
+    from generation_prompt_spine import build_system_prompt
+elif PROMPT_VARIANT == 'propose':
+    # single call, four steps, question last — the short rewrite
+    from generation_prompt_propose import build_system_prompt
+elif PROMPT_VARIANT == 'investigate':
+    # spine and statements/findings merged into one ReAct loop — see
+    # generation_prompt_investigate.py for why the split was dropped
+    from generation_prompt_investigate import build_system_prompt
 import time
 import asyncio
 import boto3
@@ -370,30 +385,47 @@ class MultiTurnReactAgent(FnCallAgent):
             "total_tokens": 0
         }
         self._total_cost_info = total_cost_info  # Save to instance variable
+        # Stages 2 and 3 run in one process and need a different prompt each, so
+        # they pass theirs in rather than going through the module-level import.
         # Reconstruct system prompt each run to randomly select an examples source
-        system_prompt = build_system_prompt()
+        system_prompt = data.get('system_prompt') or build_system_prompt()
         cur_date = today_date()
         system_prompt = system_prompt + str(cur_date)
-        
+
+        # Stages 2 and 3 assemble their own user turn (spine + corpus, or spine +
+        # findings); there is no keyword or topic line to build from.
+        override_uc = data.get('user_content')
+
         # Build user_content
-        user_content = "Topic: " + question
-        
+        user_content = override_uc or ("Topic: " + question)
+
         # If sampled keywords exist, add to user_content
-        if sampled_keywords:
+        if sampled_keywords and not override_uc:
             keywords_str = ", ".join(sampled_keywords)
             user_content += f"\n\nInitial Keyword: {keywords_str}"
-            user_content += "\n\nNote: You have been provided with 1 initial keyword above. In STEP 1 — Brainstorm Topic, you should use these as a starting point and brainstorm a research topic that needs multi-step reasoning, cross-document synthesis, and the generation of evidence-backed, long-form answers yourself."
-        
-        if complexity_class:
-            complexity_instruction = f"\n\nIMPORTANT: You must generate a task with complexity class {complexity_class}.\n"
-            user_content += complexity_instruction
+            if PROMPT_VARIANT in ('spine', 'investigate', 'propose'):
+                user_content += "\n\nNote: the keyword above is a starting point sampled from a trending-search list, not a requirement. Search wide around it first, then report in `keyword_verdict` what you did with it."
+            else:
+                user_content += "\n\nNote: You have been provided with 1 initial keyword above. In STEP 1 — Brainstorm Topic, you should use these as a starting point and brainstorm a research topic that needs multi-step reasoning, cross-document synthesis, and the generation of evidence-backed, long-form answers yourself."
 
-        # Fourth axis, carried the same way as the other three: a target stated in
-        # the prompt, not a constraint the pipeline enforces.
         analysis_load = data.get('analysis_load')
         self.analysis_load = analysis_load
-        if analysis_load:
-            user_content += f"\nAnalysis Load: {analysis_load}.\n"
+
+        # STAGE 1 gets no complexity axes. In findings8_15312041 every run
+        # recited them in round 1 and chose a subject to satisfy them before any
+        # search, and recited them again at the end to decide how many findings
+        # to write (#3 wrote "Analysis Load: Medium (need 1-2 findings)" then
+        # produced 3). Both effects are premature commitment; the axes belong to
+        # the stage that writes the question, not the one that explores.
+        if PROMPT_VARIANT != 'spine' and not override_uc:
+            if complexity_class:
+                complexity_instruction = f"\n\nIMPORTANT: You must generate a task with complexity class {complexity_class}.\n"
+                user_content += complexity_instruction
+
+            # Fourth axis, carried the same way as the other three: a target stated in
+            # the prompt, not a constraint the pipeline enforces.
+            if analysis_load:
+                user_content += f"\nAnalysis Load: {analysis_load}.\n"
 
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
         
