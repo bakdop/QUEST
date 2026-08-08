@@ -202,7 +202,18 @@ adjusting both.
 
     When the question already names what the investigation had to work out, there
     is nothing left to do and research becomes transcription. Frame it more
-    generally and let the answerer arrive there.
+    generally and let the answerer arrive there. The figures, dates and
+    conclusions your statements arrived at stay out of it entirely — those are
+    the answer, and a question that carries them is asking to be transcribed.
+
+        "How does Yale's dual-track strategy — offering courses to 13 million
+        online learners while maintaining only 38 students in exclusive online
+        degree programs out of 15,500 total — reflect the priorities of elite
+        universities balancing brand value, accessibility and revenue?"
+
+    Three figures nobody could have known before searching, handed over in the
+    question. Naming Yale and the two tracks is what pins the subject; the
+    numbers are the answer.
 
         "…comparing farmers markets and grocery stores, accounting for how
         prices vary by product type and organic status, food safety
