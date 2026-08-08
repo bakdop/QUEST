@@ -60,7 +60,7 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 say "checking prerequisites"
 [[ -d "$QUEST" ]]                  || die "QUEST repo not at $QUEST (set QUEST=...)"
 [[ -d "$SRC" ]]                    || die "no $SRC — is this the right repo?"
-for f in generation_prompt_evidence.py extract_evidence.py; do
+for f in generation_prompt_evidence.py extract_evidence.py fix_leaks.py; do
   [[ -f "$SRC/$f" ]] || die "$f missing — pull the branch that has evidence_first"
 done
 [[ -d "$MODEL" ]]                  || die "model not at $MODEL (set MODEL=...)"
@@ -180,8 +180,15 @@ for r in $RUNS; do
   say "run $r: $n trajectories"
   [[ "$n" -gt 0 ]] || { say "run $r: nothing to extract"; continue; }
   ( cd "$SRC"; source "$VENV_GEN/bin/activate"
+    export LLM_API_BASE="http://127.0.0.1:${PORT[$r]}/v1"
+    export DEEPRESEARCH_API_BASE="$LLM_API_BASE" DEEPRESEARCH_MODEL_NAME="vllm/$SERVED"
+    export DEEPRESEARCH_OPENAI_API_KEY=EMPTY
     python extract_evidence.py --input_dir "$out/trajectories" \
-                              --output_file "$out/proposed_qa.jsonl" ) | tee "$LOGS/${TAG}_${r}_qc.log"
+                              --output_file "$out/proposed_qa.jsonl"
+    # the servers are still up here, which is the only reason this can run in-line
+    python fix_leaks.py --input "$out/proposed_qa.jsonl" \
+                        --output "$out/proposed_qa.jsonl" --workers "$WORKERS"
+  ) | tee "$LOGS/${TAG}_${r}_qc.log"
 done
 
 say "DONE"
