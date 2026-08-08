@@ -39,8 +39,6 @@ elif PROMPT_VARIANT == 'investigate':
     from generation_prompt_investigate import build_system_prompt
 import time
 import asyncio
-import boto3
-from botocore.config import Config
 from litellm import completion
 import litellm
 
