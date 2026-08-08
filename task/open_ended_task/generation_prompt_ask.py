@@ -1,4 +1,4 @@
-"""STAGE 3 of the three-agent chain: a filled map -> the question.
+"""STAGE 3 of the three-agent chain: an investigated topic -> the question.
 
 NO TOOLS (`function_list=[]`). Everything this stage needs was established by the
 two before it. Searching here could only add material the findings do not cover,
@@ -19,6 +19,22 @@ Derived from generation_prompt_stage3.py. Three changes:
     a rule to be trusted — and the quotes and urls are never retyped, which is
     where transcription errors came from (an invented statement id in #11, a url
     with a space in it in #21).
+
+WRITE THE QUESTION used to be 56% of this prompt and carried three overlapping
+blocks. It now carries two. The one that went is `TWO THINGS STAY OUT` — its
+"never state the answer" and "never hand over a checklist" are both cases of the
+question naming the points the analysis reached, which the fit rule below states
+once and gives a test for. What that block held and the fit rule does not: the
+lever for moving a question (say more or less about the asker's situation, never
+about the answer) and the register point about sub-tasks reading as an
+assignment, both folded into the paragraphs that now cover them.
+
+The fit rule itself is new: a question and the material kept for it have to
+match, and both directions fail. Too loose and a good answer never has to touch
+the findings; too explicit and the question states them, so the answer is
+retrieved rather than reasoned to. There is no fixed setting — it depends on the
+material — but it is checkable one finding at a time, which is why the rule is
+phrased as two questions to ask of each.
 
 Naming contract: `proposed_question` becomes `prompt` and `centre.kept` gates the
 rubric set in longform_rubric/generate_criteria_findings.py. Do not rename either.
@@ -53,17 +69,13 @@ WRITE THE QUESTION
 ================================
 
 Write it the way a real user would ask: a short, high-level request of one to
-three sentences, with a definite subject and a definite thing to decide.
-
-It must be OPEN-ENDED — answering it takes an evidence-backed, long-form report,
-not a lookup and not a list. If a competent researcher could satisfy it in a
-paragraph, or by pasting a table, it is not the kind of question this pipeline
-exists to produce.
+three sentences, with a definite subject and a definite thing to decide. It must
+be OPEN-ENDED — answering it takes an evidence-backed, long-form report, not a
+lookup and not a list.
 
 THE SPINE IS THE FLOOR. The question is never vaguer than the topic you were
 given. That topic names a deliverable and a subject; the question keeps both and
-pins them down further. You may leave a great deal to the answerer, but never by
-giving up part of the floor.
+pins them down further.
 
     Spine     an analysis of the streaming video industry's economic
               transformation, examining how content spending, pricing and
@@ -73,35 +85,43 @@ giving up part of the floor.
               2025-26 and what that has done to where the industry's money
               comes from.
 
-The vague version dropped the deliverable, the period and the whole economic
-frame — it asks for a status update, not for the analysis the spine promised.
-Nothing in the research follows from it. The third keeps every part of the spine
-and is still wide open: which forces matter, and what "changed" amounts to, are
-left entirely to the answerer.
+The vague version gave up the deliverable, the period and the economic frame, so
+nothing in the research follows from it. The third gives up none of them and is
+still wide open.
 
-HOW MUCH TO LEAVE UNSAID is the judgement this stage makes. You move that dial by
-saying more or less about the asker's situation, constraints and goal — not by
-saying more or less about the answer. Two things stay out at every setting,
-because both make the question unresearchable rather than merely easy:
+THE QUESTION AND THE MATERIAL HAVE TO FIT EACH OTHER, and getting there means
+adjusting both.
 
-    The answer itself — the specific facts, figures and conclusions your findings
-    arrived at. Naming those turns research into transcription. A question can be
-    quite explicit about what is wanted and still leave entirely open what the
-    answer will turn out to be.
+    When a good answer could skip your findings entirely and still be a good
+    answer, the question is not asking for what you found. Tighten its
+    constraints, or drop the findings it was never going to reach.
 
-    A checklist — numbered sub-tasks, a list of dimensions to analyse, the angles
-    the answer should contain. Those are what a capable researcher works out; a
-    question that hands them over reads like a graded assignment rather than a
-    request. "Help me decide whether X is worth it for my situation" is the shape
-    to aim for.
+    When the question already names the points that took the analysis to reach,
+    there is nothing left to work out and research becomes transcription. Frame
+    it more generally and let the answerer arrive at them.
 
-Before finalising, re-read it. If it contains numbered sub-tasks, a list of what
-to analyse or compare, or the exact facts a good answer must include, rewrite it
-to hide them. When a question feels too easy, make its subject narrower rather
-than adding more to it.
+        "…comparing farmers markets and grocery stores, accounting for how
+        prices vary by product type and organic status, food safety
+        considerations across categories, nutritional and freshness factors,
+        the local economic impact of each venue, and accessibility barriers…"
 
-Three real questions, spanning the range. Note that length is not the variable —
-the shortest and the longest both ask for exactly one thing.
+    Five subtopics named in the question. What to cover is no longer something
+    the answer has to work out.
+
+Neither correction has a stopping place of its own, and pushed far enough each
+becomes the other failure. Where it settles depends on the material you actually
+have. Test one finding at a time: would a good answer have to contain this? If
+not, the question is too loose for it — or it should not be kept. Does the
+question already say it? Then the question has done the work the answer was
+supposed to do.
+
+You move the question either way by saying more or less about the asker's
+situation, constraints and goal — never by saying more or less about the answer.
+When a question feels too easy, make its subject narrower rather than adding more
+to it.
+
+Three real questions, spanning the range. Length is not the variable — the
+shortest and the longest both ask for exactly one thing.
 
     Write a series of blog posts evaluating the development of the new Silicon-Valley
     based military-industrial complex, and companies such as Palantir, Mach Industries
@@ -115,30 +135,19 @@ the shortest and the longest both ask for exactly one thing.
     Logistic Regression.
 
 The first names Palantir, Anduril, the PayPal mafia and a closing date — all
-subject, none of it the answer, and what the storyline turns out to be is left
-open. The third names nothing beyond the two methods and is complete as it
-stands, because what a good comparison contains is already understood.
-
-The failure this most often takes, from a real run of this pipeline:
-
-    "…comparing farmers markets and grocery stores, accounting for how prices vary
-    by product type and organic status, food safety considerations across categories,
-    nutritional and freshness factors, the local economic impact of each venue, and
-    accessibility barriers…"  — five subtopics handed over that an honest answer
-    would have reached on its own.
+subject, none of it the answer. The third names nothing beyond the two methods
+and is complete as it stands, because what a good comparison contains is already
+understood.
 
 Keep the task realistic — an authentic user need, never unrelated steps assembled
-to look complex — and unambiguous, avoiding "good", "effective" or "better"
-unless the question defines them.
-
-Do not ask for unbounded traversal or complete enumeration. "Introduce all the
-airports in the United States that accept the Digital ID feature" would require
-searching every airport in the country: the work is unbounded, the answer is
-never verifiably complete, and none of it is analysis. The same applies to any
-"list every…", "top-k" or "cheapest" framing that is not settled by a fixed page.
-
-Also out: video understanding, non-English sources, external tools, and anything
-whose answer changes week to week.
+to look complex, and never a run of sub-tasks that reads like a graded assignment
+rather than a request. Keep it unambiguous, avoiding "good", "effective" or
+"better" unless the question defines them. Do not ask for unbounded traversal or
+complete enumeration: "Introduce all the airports in the United States that
+accept the Digital ID feature" is unbounded, never verifiably complete, and none
+of it is analysis. The same goes for any "list every…", "top-k" or "cheapest"
+framing not settled by a fixed page. Also out: video understanding, non-English
+sources, external tools, and anything whose answer changes week to week.
 
 ================================
 REFINE WHAT YOU WERE GIVEN
