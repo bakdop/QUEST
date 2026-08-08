@@ -137,7 +137,21 @@ for r in $RUNS; do
     export NUM_ITERATIONS="$N" WORKERS="$WORKERS"
     export PROMPT_VARIANT=propose
     export FIXED_PAIRS_FILE="$FIXED_PAIRS_FILE"
-    source "$QUEST/env.local.sh"
+    # env.local.sh is gitignored, so a fresh clone will not have one. Set what
+    # the pipeline actually needs here — including the renamed tool keys, which
+    # is the one thing a newcomer cannot guess — and source the file only if it
+    # happens to exist, for anything machine-specific beyond this.
+    export SERPER_KEY_ID="${SERPER_KEY_ID:-$SERPER_API_KEY}"
+    export JINA_API_KEYS="${JINA_API_KEYS:-$JINA_API_KEY}"
+    export DEEPRESEARCH_MODEL_NAME="vllm/$SERVED"
+    export DEEPRESEARCH_API_BASE="$LLM_API_BASE"
+    export DEEPRESEARCH_OPENAI_API_KEY=EMPTY
+    export SUMMARY_MODEL_NAME="$SERVED" SUMMARY_OPENAI_API_KEY=EMPTY
+    export API_BASE="$LLM_API_BASE" API_KEY=EMPTY
+    export SAVE_TRAJ=true
+    export VISIT_CACHE_ENABLED=true VISIT_CACHE_RESUME=true
+    export SEARCH_CACHE_ENABLED=true SEARCH_CACHE_RESUME=true
+    [[ -f "$QUEST/env.local.sh" ]] && source "$QUEST/env.local.sh"
     python generate_longform_tasks.py
   ) >"$LOGS/${TAG}_${r}_gen.log" 2>&1 &
   gen_pids+=($!)
