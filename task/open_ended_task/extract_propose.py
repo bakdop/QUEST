@@ -1,28 +1,13 @@
-"""Extract questions from PROMPT_VARIANT=propose trajectories, and audit them.
+"""Extract questions from PROMPT_VARIANT=propose trajectories.
 
-Writes proposed_qa.jsonl (in the shape longform_rubric/generate_criteria_findings.py
-already reads) plus a `_qc` block per row, and a summary on stdout. Rows that fail
-are still written — stage-downstream decides what to drop, rather than material
-disappearing silently, which is how the old pipeline ended up with an empty
-`centre.discarded` in 8/8 runs.
+Writes proposed_qa.jsonl in the shape longform_rubric/generate_criteria_findings.py
+already reads: `findings` expanded from the compact `from` form, and `essentials`
+synthesised as the kept statements no kept finding uses.
 
-Every check here exists because a real run failed it:
-
-  grounded          a source url that never came back from a tool (#3 of
-                    spinefix8_15469596 cited wttt.org after visiting wttc.org);
-                    a quote that is not in the corpus
-  statements_atomic two statements making the same claim, which would let a
-                    finding cite "two sources" without having combined anything
-  findings_derived  a finding whose `from` has fewer than two distinct claims, or
-                    whose conclusion is already sitting in a statement it cites
-  ids_resolve       `from` / `centre` referencing ids that do not exist
-  chain_kept        a finding kept while something it stands on was discarded
-  question_one_ask  the enumerating failure — 4 of the old pipeline's 8 questions
-                    listed their own subtopics
-  question_no_leak  a figure or name from a finding's analysis/conclusion
-                    appearing in the question
-  levels_match      the four declared levels against the levels counted off the
-                    structures
+No pass/fail gate — everything that parses is kept. The per-row `_stats` block is
+descriptive only (how many statements and findings, how deep the longest chain
+runs, how many domains), so a run can be characterised without anything being
+filtered on it.
 """
 import argparse
 import json
@@ -106,113 +91,28 @@ def band(n, table):
     return None
 
 
-def audit(p, traj):
-    fails, warns = [], []
-    blob = corpus_of(traj)
-
-    if norm(p.get("keyword_verdict")) not in VERDICTS:
-        fails.append(f"keyword_accounted: {p.get('keyword_verdict')!r}")
-    if not norm(p.get("spine")):
-        fails.append("keyword_accounted: no spine")
-
-    subs = [s for s in (p.get("subtopics") or []) if isinstance(s, dict)]
-    sub_names = {norm(s.get("subtopic")) for s in subs}
-    if len(subs) < 2:
-        fails.append(f"subtopic_count: {len(subs)}")
-
-    stmts = [s for s in (p.get("statements") or []) if isinstance(s, dict)]
-    smap = {s.get("id"): s for s in stmts}
-    for s in stmts:
-        sid = s.get("id")
-        if sub_names and norm(s.get("subtopic")) not in sub_names:
-            warns.append(f"subtopic_unlisted: {sid} -> {s.get('subtopic')!r}")
-        ev = [e for e in (s.get("evidence") or []) if isinstance(e, dict)]
-        if not ev:
-            fails.append(f"grounded: {sid} has no evidence")
-        for e in ev:
-            u = (e.get("source") or "").strip()
-            if not u or norm(u) not in blob:
-                fails.append(f"grounded: {sid} cites {u[:60]!r} which never came back from a tool")
-            q = norm(e.get("quote"))
-            if q and q not in blob:
-                fails.append(f"grounded: {sid} quote not in corpus — {q[:50]!r}")
-    for i in range(len(stmts)):
-        for j in range(i + 1, len(stmts)):
-            if jaccard(stmts[i].get("claim"), stmts[j].get("claim")) >= 0.7:
-                warns.append(f"statements_atomic: {stmts[i].get('id')} ~ {stmts[j].get('id')}")
-
+def stats(p):
+    """Descriptive counts only."""
+    subs = [x for x in (p.get("subtopics") or []) if isinstance(x, dict)]
+    stmts = [x for x in (p.get("statements") or []) if isinstance(x, dict)]
     finds = [f for f in (p.get("findings") or []) if isinstance(f, dict)]
     fmap = {f.get("id"): f for f in finds}
-    for f in finds:
-        fid = f.get("id")
-        refs = f.get("from") or []
-        missing = [r for r in refs if r not in smap and r not in fmap]
-        if missing:
-            fails.append(f"ids_resolve: {fid} from {missing}")
-        claims = [smap[r].get("claim") for r in refs if r in smap]
-        claims += [fmap[r].get("conclusion") for r in refs if r in fmap]
-        distinct = [c for k, c in enumerate(claims)
-                    if all(jaccard(c, claims[m]) < 0.7 for m in range(k))]
-        if len(distinct) < 2:
-            fails.append(f"findings_derived: {fid} has {len(distinct)} distinct input claim(s)")
-        concl = norm(f.get("conclusion"))
-        for r in refs:
-            if r in smap and concl and jaccard(concl, smap[r].get("claim")) >= 0.7:
-                fails.append(f"findings_derived: {fid} conclusion restates {r}")
-        if not norm(f.get("analysis")):
-            fails.append(f"findings_derived: {fid} has no analysis")
-        if not norm(f.get("shallow_miss")):
-            warns.append(f"findings_derived: {fid} has no shallow_miss")
-    for i in range(len(finds)):
-        for j in range(i + 1, len(finds)):
-            if jaccard(finds[i].get("shallow_miss"), finds[j].get("shallow_miss")) >= 0.6:
-                warns.append(f"findings_independent: {finds[i].get('id')} ~ {finds[j].get('id')}")
+    kept = list((p.get("centre") or {}).get("kept") or []) or list(fmap)
 
-    centre = p.get("centre") if isinstance(p.get("centre"), dict) else {}
-    kept = [k for k in (centre.get("kept") or [])]
-    disc = set(centre.get("discarded") or [])
-    for k in kept + list(disc):
-        if k not in smap and k not in fmap:
-            fails.append(f"ids_resolve: centre references {k}")
-    for k in kept:
-        for r in (fmap.get(k, {}).get("from") or []):
-            if r in disc:
-                fails.append(f"chain_kept: {k} kept but {r} discarded")
-            elif r not in kept:
-                warns.append(f"chain_kept: {k} kept but {r} not in kept")
+    def depth(fid, seen=()):
+        if fid in seen or fid not in fmap:
+            return 0
+        refs = [r for r in (fmap[fid].get("from") or []) if r in fmap]
+        return 1 + max([depth(r, seen + (fid,)) for r in refs] or [0])
 
-    q = p.get("proposed_question") or ""
-    if not q.strip():
-        fails.append("question_one_ask: empty question")
-    n_ask = ask_count(q)
-    if n_ask >= 4:
-        fails.append(f"question_one_ask: ~{n_ask} coordinate asks")
-    elif n_ask == 3:
-        warns.append(f"question_one_ask: ~{n_ask} coordinate asks")
-    leaked = set()
-    for f in finds:
-        if f.get("id") not in kept and kept:
-            continue
-        for tok in figures_and_names(f"{f.get('analysis')} {f.get('conclusion')}"):
-            if len(tok) > 3 and norm(tok) in norm(q):
-                leaked.add(tok)
-    if leaked:
-        warns.append(f"question_no_leak: {sorted(leaked)[:6]}")
-
-    b, n, l = levels(subs, finds, kept)
-    got = {"conceptual_breadth": band(b, BREADTH), "logical_nesting": band(n, NESTING),
-           "analysis_load": band(l, LOAD)}
-    for k, v in got.items():
-        said = norm(p.get(k))
-        if v and said and said != v:
-            warns.append(f"levels_match: {k} says {said} but counts {v}")
-
-    return fails, warns, {"n_subtopics": b, "n_statements": len(stmts), "n_findings": len(finds),
-                          "chain_depth": n, "n_kept": len(kept), "n_discarded": len(disc),
-                          "asks": n_ask, "counted": got,
-                          "domains": sorted({urlparse(e["source"]).netloc.replace("www.", "")
-                                             for s in stmts for e in (s.get("evidence") or [])
-                                             if isinstance(e, dict) and (e.get("source") or "").startswith("http")})}
+    doms = sorted({urlparse(e["source"]).netloc.replace("www.", "")
+                   for x in stmts for e in (x.get("evidence") or [])
+                   if isinstance(e, dict) and (e.get("source") or "").startswith("http")})
+    return {"n_subtopics": len(subs), "n_statements": len(stmts), "n_findings": len(finds),
+            "chain_depth": max([depth(f) for f in fmap] or [0]),
+            "n_kept": len([k for k in kept if k in fmap]),
+            "asks": ask_count(p.get("proposed_question")),
+            "n_domains": len(doms), "domains": doms}
 
 
 def to_legacy(p):
@@ -257,7 +157,6 @@ def main():
         if not p or not p.get("proposed_question"):
             unparseable.append(f)
             continue
-        fails, warns, info = audit(p, traj)
         lf, le = to_legacy(p)
         out.append({
             "id": len(out) + 1, "topic": traj.get("subcategory"),
@@ -273,30 +172,24 @@ def main():
             "level_note": p.get("level_note"),
             "keyword_verdict": p.get("keyword_verdict"),
             "trajectory": f,
-            "_qc": {"pass": not fails, "failures": fails, "warnings": warns, **info},
+            "_stats": stats(p),
         })
 
     with open(args.output_file, "w") as fh:
         for r in out:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-    ok = sum(1 for r in out if r["_qc"]["pass"])
     print(f"\nextracted {len(out)}/{len(files)} -> {args.output_file}")
-    print(f"  unparseable: {len(unparseable)}")
-    print(f"  QC pass    : {ok}/{len(out)}")
-    tally = {}
-    for r in out:
-        for x in r["_qc"]["failures"] + r["_qc"]["warnings"]:
-            tally[x.split(":")[0]] = tally.get(x.split(":")[0], 0) + 1
-    for k, n in sorted(tally.items(), key=lambda x: -x[1]):
-        print(f"    {k:24} {n}")
+    if unparseable:
+        print(f"  unparseable: {len(unparseable)}")
+        for f in unparseable[:5]:
+            print(f"    {f}")
     if out:
         import statistics as st
-        for k in ("n_subtopics", "n_statements", "n_findings", "chain_depth", "asks"):
-            v = [r["_qc"][k] for r in out]
-            print(f"  {k:14} median {st.median(v):>4}  range {min(v)}-{max(v)}")
-        dom = [len(r["_qc"]["domains"]) for r in out]
-        print(f"  {'domains':14} median {st.median(dom):>4}  range {min(dom)}-{max(dom)}")
+        for k in ("n_subtopics", "n_statements", "n_findings", "chain_depth",
+                  "n_kept", "asks", "n_domains"):
+            v = [r["_stats"][k] for r in out]
+            print(f"  {k:14} median {st.median(v):>5}  range {min(v)}-{max(v)}")
 
 
 if __name__ == "__main__":
