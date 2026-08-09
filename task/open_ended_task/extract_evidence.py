@@ -8,13 +8,19 @@ the url that returned it — so the two things this has to do are shape it for t
 rubric generator and measure the investigation.
 
 MEASURE. Nothing is injected upstream, so every axis is counted here. Depth is
-read off `key_queries`, where each recorded search names the statements whose
-reading sent the run looking for it and the statements it produced: the chain is
-statement -> query -> statement, and its length is how far the investigation had
-to go. A single-parent step counts, unlike in extract_chain.py, where the merge
+read off `research_path`, where each step names the statements it needed to be
+asked and the statements it brings back: the chain is statement -> query ->
+statement, and its length is how far someone holding only the question has to go.
+A single-parent step counts, unlike in extract_chain.py, where the merge
 requirement existed to stop an inference ladder scoring as depth. It does not
 apply here — every link is a retrieval carrying its own quote and url, so the
 chain cannot be padded without actually going and looking.
+
+`research_path` was `key_queries` until 2026-08-09 and its second field was
+`yielded`; both spellings are still read, because the five runs made under the old
+prompt are the baseline the new ones get compared against. Those runs emitted
+`{query, prompted_by}` instead, so `path_schema_share` reads 0.0 on all of them —
+which is the point of measuring it.
 
 SHAPE. longform_rubric/generate_criteria_findings.py reads `findings` with
 `conclusion` and `evidence[{url, quote}]`. Until it is rewritten to read
@@ -138,6 +144,11 @@ def question_signals(q, subs, stmts):
                      if norm(t) in qn or re.sub(r"[.,$£€%]", "", norm(t)) in flat})
     return {
         "subtopics_named_in_question": named,
+        # the two pollution sentinels for WHAT ELSE THE TOPIC COULD HAVE, added
+        # 2026-08-09. Baselines are the five runs of the prompt that had no such
+        # list, measured here rather than by eye — median named_share 0.75 (14 of
+        # 21 subtopics), median coordinate_asks 4. Neither may rise.
+        "named_share": round(len(named) / len(subs), 3) if subs else 0.0,
         "exposure_disagreement": disagree,
         "leaked_figures": leaked,
         "coordinate_asks": coordinate_asks(q),
@@ -220,12 +231,15 @@ def rounds(traj):
 def parents_of(stmts, queries):
     """statement id -> the statements whose reading sent the run looking for it.
 
-    Read off `key_queries`, not off the statements. The relation the
-    investigation actually has is statement -> query -> statement: reading S5 and
-    S8 prompts a search, and that search returns S6. An earlier version asked each
-    statement for a `built_on` list and got the wrong thing — the run with the
-    strongest investigation left it empty on all nine statements, correctly, since
-    every statement was a direct retrieval and none was derived from another.
+    Read off `research_path`, not off the statements. The relation is question ->
+    query -> statement -> query -> statement: holding S5 and S8 is what lets you
+    ask the query that returns S6. An earlier version asked each statement for a
+    `built_on` list and got the wrong thing — the run with the strongest
+    investigation left it empty on all nine statements, correctly, since every
+    statement was a direct retrieval and none was derived from another.
+
+    `yielded` is the pre-2026-08-09 spelling, kept so the five runs made under the
+    old prompt still parse.
     """
     ids = {s.get("id") for s in stmts if isinstance(s, dict)}
     par = {}
@@ -233,7 +247,7 @@ def parents_of(stmts, queries):
         if not isinstance(q, dict):
             continue
         src = [f for f in (q.get("from") or []) if f in ids]
-        for y in (q.get("yielded") or []):
+        for y in (q.get("yields") or q.get("yielded") or []):
             if y in ids:
                 par.setdefault(y, set()).update(src)
     return par
@@ -259,6 +273,57 @@ def chain_depth(stmts, queries):
         return (1 if ps else 0) + max([d(p, seen + (sid,)) for p in ps] or [0])
 
     return max(d(i) for i in ids) + 1
+
+
+FIG = re.compile(r"\d[\d,.]*%?")
+
+
+def figures(text):
+    """Figures as written, less the punctuation a sentence leaves on the end."""
+    return {f for f in (m.rstrip(".,") for m in FIG.findall(text or "")) if f}
+
+
+def unwritten(subs, stmts):
+    """Figures in `what_it_shows` that no statement under that handle carries.
+
+    The sink this measures: over 503 propose runs 27% of the figures written into
+    `what_it_shows` never reached a statement, and 82% of those were still sitting
+    verbatim in the run's own tool responses. The run had retrieved them and then
+    dropped them on the way to the structured output. A quote and a url are what
+    make a figure usable downstream, so one that never became a statement is one
+    the rubric generator cannot see.
+    """
+    carried = {}
+    for s in stmts:
+        if not isinstance(s, dict):
+            continue
+        text = " ".join([str(s.get("claim") or "")]
+                        + [str(e.get("quote") or "") for e in (s.get("evidence") or [])
+                           if isinstance(e, dict)])
+        carried.setdefault(norm(s.get("subtopic")), []).append(text)
+    missing, total = [], 0
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        shown = figures(sub.get("what_it_shows"))
+        total += len(shown)
+        missing += sorted(shown - figures(" ".join(carried.get(norm(sub.get("handle")), []))))
+    return missing, total
+
+
+def material_of(n_stmts, n_doms):
+    """What a subtopic actually holds, replacing the model's self-report.
+
+    `material` used to be written upstream and did not track what got recorded:
+    subtopics marked `rich` averaged 2.64 statements and 18.9% of them held one or
+    none. Two statements is the floor for a section that is not a single fact, and
+    a second domain is what separates a corroborated point from one page.
+    """
+    if n_stmts >= 3 and n_doms >= 2:
+        return "rich"
+    if n_stmts >= 2:
+        return "adequate"
+    return "thin"
 
 
 def to_legacy(stmts, kept):
@@ -291,23 +356,47 @@ def signals(p, stmts, subs, traj):
                    for s in stmts for e in (s.get("evidence") or [])
                    if isinstance(e, dict) and (e.get("source") or "").startswith("http")})
     centre = p.get("centre") or {}
+    kept = [i for i in (centre.get("kept") or [])]
     ids = {s.get("id") for s in stmts}
     s_rounds, v_rounds = rounds(traj)
-    kq = [q for q in (p.get("key_queries") or []) if isinstance(q, dict)]
-    carried = [q for q in kq if q.get("from")]
-    reached = {y for q in kq for y in (q.get("yielded") or []) if y in ids}
-    named = {i for q in kq for i in (q.get("from") or []) + (q.get("yielded") or [])}
+    path = [q for q in (p.get("research_path") or p.get("key_queries") or [])
+            if isinstance(q, dict)]
+    yields_of = lambda q: (q.get("yields") or q.get("yielded") or [])
+    carried = [q for q in path if q.get("from")]
+    reached = {y for q in path for y in yields_of(q) if y in ids}
+    named = {i for q in path for i in (q.get("from") or []) + list(yields_of(q))}
+    # the schema the current prompt asks for, so a run emitting the pre-2026-08-09
+    # `{query, prompted_by}` shape shows up as 0 rather than as a healthy path
+    conformant = [q for q in path if "from" in q and ("yields" in q or "yielded" in q)]
+    dropped, shown = unwritten(subs, stmts)
+    sub_doms = {}
+    for s in stmts:
+        sub_doms.setdefault(norm(s.get("subtopic")), set()).update(
+            urlparse(e["source"]).netloc.replace("www.", "")
+            for e in (s.get("evidence") or [])
+            if isinstance(e, dict) and (e.get("source") or "").startswith("http"))
     return {
         # what share of the recorded searches came out of something already read
-        "carried_query_share": round(len(carried) / len(kq), 3) if kq else 0.0,
+        "carried_query_share": round(len(carried) / len(path), 3) if path else 0.0,
         # what share of statements a recorded search claims to have produced
         "reached_by_query_share": round(len(reached) / len(stmts), 3) if stmts else 0.0,
-        "n_key_queries": len(kq),
+        "n_research_path": len(path),
+        "path_schema_share": round(len(conformant) / len(path), 3) if path else 0.0,
+        # every id in centre.kept has to be reached by exactly one step
+        "kept_reached_share": round(len([i for i in kept if i in reached]) / len(kept), 3)
+                              if kept else 0.0,
+        "kept_unreached": [i for i in kept if i not in reached],
+        # figures written into what_it_shows that never became a statement
+        "unwritten_figures": dropped,
+        "unwritten_share": round(len(dropped) / shown, 3) if shown else 0.0,
         "statements_per_subtopic": {"median": st.median(counts) if counts else 0,
                                     "min": min(counts) if counts else 0,
-                                    "empty": sum(1 for c in counts if c == 0)},
+                                    "empty": sum(1 for c in counts if c == 0),
+                                    "thin": sum(1 for c in counts if c <= 1)},
         "subtopic_words": [len((s.get("query") or "").split()) for s in subs],
-        "material": Counter(s.get("material") for s in subs),
+        "material": Counter(material_of(per_sub.get(norm(s.get("handle")), 0),
+                                        len(sub_doms.get(norm(s.get("handle")), ())))
+                            for s in subs),
         "domains": doms, "n_domains": len(doms),
         "no_evidence": [s.get("id") for s in stmts if not (s.get("evidence") or [])],
         "statements_off_map": [s.get("id") for s in stmts
@@ -345,8 +434,19 @@ def main():
         subs = [s for s in (p.get("subtopics") or []) if isinstance(s, dict)]
         kept = {i for i in ((p.get("centre") or {}).get("kept") or [])}
 
+        path = p.get("research_path") or p.get("key_queries")
+        # `material` is no longer written upstream; it is what the subtopic holds
+        per_sub = Counter(norm(s.get("subtopic")) for s in stmts)
+        for s in subs:
+            h = norm(s.get("handle"))
+            doms = {urlparse(e["source"]).netloc.replace("www.", "")
+                    for x in stmts if norm(x.get("subtopic")) == h
+                    for e in (x.get("evidence") or [])
+                    if isinstance(e, dict) and (e.get("source") or "").startswith("http")}
+            s["material"] = material_of(per_sub.get(h, 0), len(doms))
+
         n_sub, n_st = len(subs), len(stmts)
-        depth = chain_depth(stmts, p.get("key_queries"))
+        depth = chain_depth(stmts, path)
         implicit = sum(1 for s in subs if str(s.get("exposure")).lower() == "implicit")
         share = implicit / n_sub if n_sub else 0.0
         out.append({
@@ -354,13 +454,12 @@ def main():
             "topic": traj.get("subcategory"),
             "keyword": keyword_of(traj),
             "prompt": p["proposed_question"],
-            "spine": p.get("spine"),
             "subtopics": subs,
             "statements": stmts,
             "findings": to_legacy(stmts, kept),
             "essentials": [],
             "centre": p.get("centre"),
-            "key_queries": p.get("key_queries"),
+            "research_path": path,
             "keyword_verdict": p.get("keyword_verdict"),
             "keyword_note": p.get("keyword_note"),
             "trajectory": f,
@@ -397,7 +496,19 @@ def main():
     print(f"  subtopic words   median {st.median(words) if words else 0}"
           f"   (propose baseline: 4)")
     per = [r['_signals']['statements_per_subtopic']['median'] for r in out]
-    print(f"  statements/sub   median {st.median(per)}   (propose baseline: 2)")
+    print(f"  statements/sub   median {st.median(per)}   (evidence baseline 2.0)")
+    slots = sum(r['_axes']['conceptual_breadth'] for r in out)
+    thin = sum(r['_signals']['statements_per_subtopic']['thin'] for r in out)
+    print(f"  subtopics on <=1 statement  {thin}/{slots}"
+          f"   (evidence baseline 8/21)")
+    print(f"  unwritten figures share  median "
+          f"{med(lambda r: r['_signals']['unwritten_share'])}"
+          f"   <- in what_it_shows, never a statement (evidence baseline .211)")
+    print(f"  research_path schema     median "
+          f"{med(lambda r: r['_signals']['path_schema_share'])}"
+          f"   <- steps carrying from/yields (baseline 0.0)")
+    print(f"  centre.kept reached      median "
+          f"{med(lambda r: r['_signals']['kept_reached_share'])}   (must be 1.0)")
     print(f"  carried queries  median {med(lambda r: r['_signals']['carried_query_share'])}"
           f"   <- searches that came out of something already read")
     print(f"  reached by query median {med(lambda r: r['_signals']['reached_by_query_share'])}"
@@ -416,7 +527,7 @@ def main():
     dis = sum(len(r['_signals']['exposure_disagreement']) for r in out)
     subs_n = sum(r['_axes']['conceptual_breadth'] for r in out)
     print(f"  subtopics named in the question   {named}/{subs_n}"
-          f"   of which marked implicit: {dis}")
+          f"   (baseline 14/21)   of which marked implicit: {dis}")
     tiers = Counter()
     for r in out:
         tiers.update(r['_signals']['source_tiers'])
@@ -428,7 +539,9 @@ def main():
           f" / {med(lambda r: r['_signals']['visits'])}")
     for k, label in (("no_evidence", "statements with no evidence"),
                      ("statements_off_map", "statements off the subtopic list"),
-                     ("dangling_query_ids", "key_queries ids that do not exist"),
+                     ("dangling_query_ids", "research_path ids that do not exist"),
+                     ("kept_unreached", "centre.kept ids no research_path step reaches"),
+                     ("unwritten_figures", "figures in what_it_shows that never became a statement"),
                      ("leaked_figures", "figures from a statement restated in the question")):
         n = sum(len(r["_signals"][k]) for r in out)
         if n:

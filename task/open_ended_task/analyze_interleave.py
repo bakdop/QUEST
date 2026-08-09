@@ -2,12 +2,14 @@
 
     python analyze_interleave.py --input_dir outputs/<tag>/trajectories
 
-`key_queries` is a retrospective self-report: the model reconstructs, while
-writing the answer, which reading sent it looking for what. That is the same class
-of field as `centre.discarded` (empty in 8 of 8 runs) and the complexity axes (the
-self-reported value did not match the sampled one), so a low carried-query share
-is ambiguous on its own and this script exists to disambiguate it — it counts the
-interleave off the trajectory, where the model has no say.
+Since 2026-08-09 nothing in the output records the session at all. `key_queries`
+was a retrospective self-report of what the run did; `research_path` replaced it
+and answers a different question — the path someone holding only the finished
+question would walk to reach the centre. Neither the generator's wandering nor its
+change of topic appears anywhere now, by design.
+
+So this script is the only measurement of whether the run itself interleaved, and
+it takes it off the trajectory, where the model has no say.
 
 The trajectory has the real sequence — which round issued which query, and which
 round first returned each url — so the interleave can be counted rather than
@@ -20,17 +22,18 @@ asked for:
                     round's tool output and is not in the topic or keyword —
                     a query that could only have been written after reading.
 
-Read against what the run recorded in `key_queries`, the two separate the cases:
+Read against the `research_path` depth that extract_evidence.py reports, the two
+now separate a different pair of cases:
 
-  interleave high, record thin   the behaviour is there and the annotation is
-                                 not. That was the diagnosis on the first five
-                                 runs, where the strongest investigation of the
-                                 five annotated none of it.
-  both low                       the behaviour is not there. A prompt change is
-                                 the wrong first move — this project has tied on
-                                 six of them.
-  interleave low, few rounds     the run stopped early; look at why before
-                                 reading anything into the depth.
+  interleave high, path shallow  the run did the work and the question does not
+                                 need it. The material is deeper than what was
+                                 asked for — tighten the question, not the search.
+  both low                       the run stopped early. A prompt change is the
+                                 wrong first move — this project has tied on six
+                                 of them; look at why it stopped.
+  interleave low, path deep      the path is a story. Someone holding only the
+                                 question could not have walked it, because the
+                                 run never walked anything like it either.
 """
 import argparse
 import json
@@ -101,8 +104,9 @@ def analyse(traj, pred):
     for i, (_, resp) in enumerate(rs):
         if any(u and u in resp for u in srcs):
             src_rounds.add(i + 1)
-    kq = [q for q in (pred.get("key_queries") or []) if isinstance(q, dict)]
-    recorded = sum(1 for q in kq if q.get("from"))
+    path = [q for q in (pred.get("research_path") or pred.get("key_queries") or [])
+            if isinstance(q, dict)]
+    recorded = sum(1 for q in path if q.get("from"))
     return {
         "rounds": len(rs),
         "queries": total_q,
@@ -111,7 +115,7 @@ def analyse(traj, pred):
         "source_rounds": len(src_rounds),
         "statements": len(stmts),
         "recorded": recorded,
-        "recorded_share": round(recorded / len(kq), 2) if kq else 0.0,
+        "recorded_share": round(recorded / len(path), 2) if path else 0.0,
     }
 
 

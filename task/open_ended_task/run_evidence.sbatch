@@ -139,12 +139,32 @@ import json, os, statistics as st
 p = os.path.join(os.environ["OUT_DIR"], "proposed_qa.jsonl")
 rows = [json.loads(l) for l in open(p)]
 sig = lambda k: sum(1 for r in rows if (r.get("_signals") or {}).get(k))
+med = lambda k, d=0: st.median([(r.get("_signals") or {}).get(k, d) for r in rows]) if rows else 0
 print(f"  questions            {len(rows)}")
 print(f"  rewritten            {sig('leak_rewritten')}")
 print(f"  still leaking        {sig('leak_unfixed')}")
 print(f"  situated             {sum(1 for r in rows if (r.get('_signals') or {}).get('situated'))}")
-asks = [(r.get('_signals') or {}).get('coordinate_asks', 0) for r in rows]
-print(f"  coordinate asks      median {st.median(asks) if asks else 0}   (ResearchRubrics: 1)")
+
+# Acceptance for the 2026-08-09 prompt. Baselines are the five runs that preceded
+# it (outputs/trajectories), measured by this same code — not by eye, and not by
+# the ad-hoc scripts used while diagnosing, whose stopword list and per-subtopic
+# aggregation differ enough to read a flat result as a 0.47 -> 0.75 regression.
+print()
+print("  metric                      baseline  now")
+print(f"  research_path schema          0.0     {med('path_schema_share')}")
+print(f"  centre.kept reached           0.0     {med('kept_reached_share')}   (must be 1.0)")
+print(f"  unwritten figures share       0.211   {med('unwritten_share')}")
+sps = [(r.get('_signals') or {}).get('statements_per_subtopic') or {} for r in rows]
+slots = sum(len((r.get('subtopics') or [])) for r in rows)
+thin = sum(s.get('thin', 0) for s in sps)
+print(f"  statements/subtopic           2.0     {st.median([s.get('median', 0) for s in sps]) if sps else 0}")
+print(f"  subtopics on <=1 statement    8/21    {thin}/{slots}")
+depth = [(r.get('_axes') or {}).get('logical_nesting', 0) for r in rows]
+print(f"  chain depth                   1       {st.median(depth) if depth else 0}"
+      f"   (>=2 in {sum(1 for d in depth if d >= 2)}/{len(rows)})")
+print("  -- pollution sentinels for WHAT ELSE THE TOPIC COULD HAVE; neither may rise --")
+print(f"  subtopics named in question   0.75    {med('named_share')}")
+print(f"  coordinate asks               4       {med('coordinate_asks')}   (ResearchRubrics: 1)")
 PY2
 
 echo
