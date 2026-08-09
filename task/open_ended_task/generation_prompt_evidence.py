@@ -20,9 +20,9 @@ search next. At every step a reasoning sub-step interprets the evidence so far
 and identifies what is still missing, and a retrieval sub-step acquires the next
 piece; what gets read reshapes the plan, and the plan determines the next query.
 Analysis being instrumental, it has no field of its own. It leaves two traces:
-`key_queries`, where a search names the statements that sent the model looking for
-it and the statements it produced, and the subtopic list, which changes as the
-investigation runs.
+`research_path`, where a search names the statements it needed to be asked and the
+statements it produced, and the subtopic list, which changes as the investigation
+runs.
 
 That first trace started life as `built_on` on each statement, and reading the
 first five runs showed it was modelling the wrong relation. The run with by far
@@ -44,6 +44,66 @@ No complexity axis is injected; all four are measured afterwards in
 extract_evidence.py. No `unusable` verdict: nothing filters on it, so it would
 only be a cheap exit.
 
+Five things changed after reading the first five runs of this prompt.
+
+`research_path` was `key_queries`, and it was written inside INVESTIGATE — before
+the question existed. Position decided content: all 18 recorded entries were a log
+of the session, and two of them recorded the topic hunt itself ("searched for the
+intersection of viral fame and publishing to find a Books & Reading topic"). Early
+queries cannot be motivated by a question that is not written yet, and 457 of 503
+propose runs moved the keyword, so the hunt is most of what the early entries hold.
+It now sits after MARK and asks a different thing: the path from the question to
+the centre, which someone holding only the question could walk. `from` is the
+dependency edge, so chain depth becomes a property of the question rather than of
+the run's luck.
+
+`what_it_shows` had no prose anywhere, and it had become the sink: 27% of the
+figures written into it over 503 propose runs never appeared in any statement, and
+82% of those were still sitting verbatim in the run's own tool responses. A pure
+recording loss. The rule now runs the other way — everything in it must be carried
+by a statement — and it is placed so that subtopics, which the schema emits first,
+create the obligation on the statements that follow.
+
+Eight moves were added, taken from the twenty atomic research capabilities and cut
+to the ones that change what you go and look for. The twelve left out either read
+as report sections (genre completeness, cost, failure modes, accountability,
+operationalisation), which the question would have absorbed as a list of parts —
+3 of 5 runs already wrote "…examining X, Y and Z" with no list in front of them —
+or have nothing to retrieve (case binding, precedent transfer, terminological
+anchoring), or are already in the prompt (instance grounding, quantified basis,
+provenance).
+
+They are framed as examples, not as a taxonomy of what a next query can be. Two
+earlier drafts said "a next query exists because something you are holding is
+incomplete in a particular way. These are the ways", and made `why` in
+`research_path` one of them — which would have left the ordinary follow-up, the
+figure whose source is not named, looking like it had to fit a category. The
+section is scoped by its second paragraph, which names the one moment it is for:
+a round that came up empty, or having enough to write a question from and being
+ready to be done. That is where the runs were failing — eleven rounds and six
+statements, stopping as soon as a question could be written. The title says
+`could have` rather than `has` for the same reason the body says most of the eight
+will have nothing on a given topic: they are possible gaps, not facts about it,
+and a title asserting the topic holds all eight would pull against the line
+forbidding an invented name or figure to satisfy one.
+
+`material` is gone from the output. It was a self-report on how much the search
+results looked like, uncorrelated with what was recorded: subtopics marked `rich`
+averaged 2.64 statements and 18.9% of them held one or none.
+
+`spine` is gone too, which finishes what 8af179e started. That commit deleted THE
+SPINE IS THE FLOOR on the grounds that the spine is written after the
+investigation and is therefore already a summary of the material, so anchoring the
+question to it only got the summary paraphrased — all five runs did it. What was
+left was a summary with no rule hanging off it: nothing downstream reads it (the
+rubric generator takes `findings`, `centre` and `essentials`; fix_leaks.py takes
+the question and the statements), and it constrained nothing upstream either,
+because no rule required the subtopics to be its sections. Emitting it first only
+buys something when the earlier field puts a checkable obligation on the later
+one, which is what `what_it_shows` does to the statements and what this never did.
+The deliverable form survives in the three worked examples under WRITE THE
+QUESTION.
+
 Select with PROMPT_VARIANT=evidence_first.
 """
 
@@ -56,11 +116,10 @@ interprets the evidence so far and identifies what is still missing; a retrieval
 sub-step acquires the next piece based on that determination. The two interleave:
 what you read reshapes the plan, and the evolving plan determines the next query.
 
-What you hand over is the spine of the topic, the subtopics a report on it would
-be organised by, the statements it would draw on, and the question itself. The
-order matters — the question is written last, out of what the investigation
-reached. A question written earlier can only ask for what you knew before you
-started.
+What you hand over is the subtopics a report on the topic would be organised by,
+the statements it would draw on, and the question itself. The order matters — the
+question is written last, out of what the investigation reached. A question
+written earlier can only ask for what you knew before you started.
 
 ================================
 EXPLORE THE TOPIC
@@ -114,10 +173,39 @@ After each round, ask what the evidence now establishes, what a good answer to
 this topic still needs settled, and whether this is still the topic worth
 answering. Any of the three can set the next query.
 
-Keep a record of the searches that changed where you went next — the handful that
-moved things, not every call you made. For each, note what you had just read that
-sent you there, which statements that reading came from, and which statements the
-search produced. An opening search has nothing behind it and says so.
+================================
+WHAT ELSE THE TOPIC COULD HAVE
+================================
+
+Most of what you search next comes straight out of what you just read — a figure
+whose source is not named, a claim two pages disagree on, a term you had to look
+up. Those follow on their own, and none of this is about them.
+
+This is for the moment they run out: a round comes up empty, or you have enough
+to write a question from and are ready to be done. What a topic still has at that
+point tends to look like one of these.
+
+    members        having the one or two most salient of a set, and not the rest
+                   of what the topic implies
+    each member    having a member named and nothing else on it
+    mechanism      having a cause and an effect as endpoints, with no links
+                   between them
+    confounders    having a conclusion, and not the omitted variables that would
+                   change it
+    alternatives   having one option, and not the others pursuing the same end
+    time           having a window, and not what made it possible before or what
+                   followed after
+    whose view     having the account of the parties in the foreground, and not
+                   of those affected, opposed, or made to operate it
+    binding rules  having a recommendation, and not the statute, licence,
+                   official mechanics or versioned policy that could void it
+
+One or two will be worth following and the rest will have nothing on this topic.
+Follow one only where someone who works in this field would naturally ask it here,
+and never invent a name, a figure or an institution to satisfy a line.
+
+Whatever comes of it stays on the search side: do not mention any of this in the
+question, and do not turn these into the parts of what you ask for.
 
 ================================
 SUBTOPICS — THE PLAN
@@ -147,6 +235,21 @@ would have to be true for the obvious answer to be wrong.
 A subtopic you found in round four is worth more than one you started with, not
 less. It earns its place when material comes back for it: if you think one is
 missing, go and search it rather than write it down.
+
+`what_it_shows` is what the evidence you found actually says about that subtopic,
+at the resolution you found it in — the figures, dates and names, not a
+description of the area:
+
+    handle          price by category
+    what_it_shows   a 14-item conventional basket ran $1.32 higher at the market
+                    at the median and strawberries $2.44 higher, while the
+                    organic basket ran $16.34 lower ($61.97 vs $78.31)
+
+Everything in it has to be carried by a statement. Every figure, date, name and
+quoted phrase you write there must appear in one of the statements below, with
+its verbatim quote and the url that returned it. Write the subtopics first, then
+go back over them line by line: anything with nothing to carry it is a statement
+you have not written down yet, so write it before you go on.
 
 ================================
 STATEMENTS
@@ -291,6 +394,49 @@ statement can be sound and still sit to one side of what the question settles.
 If you are keeping everything, look again.
 
 ================================
+RESEARCH PATH
+================================
+
+Now write the path to the answer. Someone is handed your question and nothing
+else — not the keyword, not the topic, none of what you read. Set down the
+searches that take them from the question to every statement in the centre.
+
+    step 1  queries  "farmers market vs supermarket price comparison"
+            from     []
+            yields   [S1, S2]
+            why      the question asks which venue is cheaper; this is what you
+                     can ask before knowing anything
+
+    step 2  queries  "asap connections local food price study organic basket"
+            from     [S2]
+            yields   [S3]
+            why      S2 attributes the "markets are cheaper" claim to one study
+                     without saying which basket it priced — that is what sends
+                     you to the study itself
+
+The first step has to be writable from the question alone, so its `from` is
+empty. Every later step names in `from` the statements you must already hold to
+know to ask it, and in `yields` the statements it brings back. Those two are the
+chain: a step in the middle of the path whose `from` is empty is a query someone
+could have written at the start, and belongs at the start.
+
+`why` is the gap in what `from` already holds that this step goes and closes.
+Write the gap itself, in the concrete, the way step 2 above does — what those
+statements leave open, never a category the step falls into:
+
+    why   S2 attributes the "markets are cheaper" claim to one study without
+          saying which basket it priced
+    not   S2 needed following up
+
+Every id in `centre.kept` appears in exactly one step's `yields`. If one of them
+has no step reaching it, the path is unfinished — or that statement cannot be
+reached from your question, which is a fact about the question, not the path.
+
+This is the path from the question, not a record of what you did. How you got
+from the keyword to a topic, and any topic you tried and left behind, stay out of
+it entirely.
+
+================================
 OUTPUT
 ================================
 
@@ -301,12 +447,10 @@ closing tag, then STOP.
 {
   "keyword_verdict": "kept | narrowed | replaced",
   "keyword_note": "what you did with the keyword and why",
-  "spine": "the deliverable form and the topic, in one or two sentences",
   "subtopics": [
     {"handle": "two or three words",
      "query": "the question this section of the report has to answer",
-     "material": "rich | adequate | thin",
-     "what_it_shows": "what the evidence shows about it, concretely",
+     "what_it_shows": "what the evidence says about it, at the resolution you found it",
      "exposure": "explicit | implicit"}
   ],
   "statements": [
@@ -317,24 +461,26 @@ closing tag, then STOP.
   "centre": {"kept": ["S1", "S3"], "discarded": ["S9"],
              "discard_reason": "why each discarded id was dropped"},
   "proposed_question": "the question, as a plain string",
-  "key_queries": [
-    {"queries": ["every query you sent in that one search call"],
-     "why": "what you had just read that made this the next thing to look for",
+  "research_path": [
+    {"queries": ["the queries someone would send in that one search call"],
+     "why": "what in the question, or in the statements already reached, makes this the next thing to look for",
      "from": ["S5", "S8"],
-     "yielded": ["S6"]}
+     "yields": ["S6"]}
   ]
 }
 </answer>
 
-One entry in `key_queries` is one search: `queries` holds all the strings you sent
-in it, `why` says what you had just read that sent you there, `from` names the
-statements that reading came from and is empty for an opening search, and
-`yielded` names the statements the search produced.
+One entry in `research_path` is one search on the way from the question to the
+centre: `queries` holds the strings sent in it, `why` says what makes it the next
+thing to look for, `from` names the statements you must already hold to know to
+ask it and is empty only for the opening step, and `yields` names the statements
+it brings back.
 
 It must satisfy: at least two subtopics, and every statement's `subtopic` is one
 of their handles; every statement has evidence, every quote verbatim from a tool
 response and every source a url that came back from one; no two statements making
-the same claim; every id named in `key_queries` or in `centre` existing.
+the same claim; every id named in `research_path` or in `centre` existing; every
+id in `centre.kept` appearing in exactly one step's `yields`.
 
 Check it parses before emitting: strings quoted and escaped, lists closed, no
 trailing commas.
