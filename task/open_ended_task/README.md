@@ -1,5 +1,8 @@
 # Open-Ended Task Generation
 
+> For the evidence-first variant used to build long-form SFT questions and
+> corpus-grounded rubrics, see [LONGFORM_EVIDENCE.md](LONGFORM_EVIDENCE.md).
+
 This directory runs the QUEST open-ended task generation pipeline. It produces
 longform research tasks, builds evaluation criteria, generates reference
 answers, and exports final open-ended QA data.
