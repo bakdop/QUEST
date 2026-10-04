@@ -16,10 +16,15 @@ from qwen_agent.settings import MAX_LLM_CALL_PER_RUN
 from qwen_agent.tools import BaseTool
 from qwen_agent.utils.utils import format_as_text_message, merge_generate_cfgs
 from generation_prompt_longform import *
+# PROMPT_VARIANT=evidence_first replaces the upstream proposer prompt with the
+# evidence-first one (generation_prompt_evidence.py): one ReAct loop that searches
+# wide around the seed keyword, records the statements it retrieves, and writes the
+# question last. Unset, the upstream prompt from generation_prompt_longform is used.
+PROMPT_VARIANT = os.getenv('PROMPT_VARIANT', 'default')
+if PROMPT_VARIANT == 'evidence_first':
+    from generation_prompt_evidence import build_system_prompt
 import time
 import asyncio
-import boto3
-from botocore.config import Config
 from litellm import completion
 import litellm
 
@@ -141,7 +146,12 @@ class MultiTurnReactAgent(FnCallAgent):
                 print(f"WARNING: API_BASE is set for OpenAI model. This may indicate vLLM usage. Using api_base: {api_base}")
                 call_kwargs["api_base"] = api_base
         elif model_name.startswith("vllm/"):
-            # Local vLLM (OpenAI compatible format) configuration
+            # Local vLLM (OpenAI compatible format) configuration.
+            # LiteLLM routes the bare "vllm/" prefix to its *offline* backend, which
+            # imports the vllm package and loads weights in-process. Rewrite to
+            # "hosted_vllm/", which is the OpenAI-compatible HTTP client.
+            model_name = f"hosted_vllm/{model_name[len('vllm/'):]}"
+            call_kwargs["model"] = model_name
             api_key = os.environ.get("DEEPRESEARCH_OPENAI_API_KEY", "EMPTY")
             call_kwargs["api_key"] = api_key
             # vLLM must set api_base
@@ -296,12 +306,19 @@ class MultiTurnReactAgent(FnCallAgent):
         if last_token_count > 0:
             return last_token_count
         
-        # Fallback to local calculation
-        tokenizer = AutoTokenizer.from_pretrained(self.llm_local_path) 
+        # Fallback to local calculation. llm_local_path is the LiteLLM model name
+        # (e.g. "vllm/qwen3.5-122b"), which is not a loadable tokenizer, so allow
+        # TOKENIZER_PATH to point at the real weights directory.
+        tokenizer_path = os.environ.get("TOKENIZER_PATH") or self.llm_local_path
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        except Exception as e:
+            print(f"WARNING: could not load tokenizer from '{tokenizer_path}' ({e}). "
+                  f"Set TOKENIZER_PATH to the model directory for accurate counts.")
+            return 0
         full_prompt = tokenizer.apply_chat_template(messages, tokenize=False)
-        tokens = tokenizer(full_prompt, return_tensors="pt")
-        token_count = len(tokens["input_ids"][0])
-        
+        token_count = len(tokenizer(full_prompt)["input_ids"])
+
         return token_count
             
     def save_trajectory(self, result):
@@ -356,20 +373,26 @@ class MultiTurnReactAgent(FnCallAgent):
         system_prompt = build_system_prompt()
         cur_date = today_date()
         system_prompt = system_prompt + str(cur_date)
-        
+
         # Build user_content
         user_content = "Topic: " + question
-        
+
         # If sampled keywords exist, add to user_content
         if sampled_keywords:
             keywords_str = ", ".join(sampled_keywords)
             user_content += f"\n\nInitial Keyword: {keywords_str}"
-            user_content += "\n\nNote: You have been provided with 1 initial keyword above. In STEP 1 — Brainstorm Topic, you should use these as a starting point and brainstorm a research topic that needs multi-step reasoning, cross-document synthesis, and the generation of evidence-backed, long-form answers yourself."
-        
-        if complexity_class:
+            if PROMPT_VARIANT == 'evidence_first':
+                user_content += "\n\nNote: the keyword above is a starting point sampled from a trending-search list, not a requirement. Search wide around it first, then report in `keyword_verdict` what you did with it."
+            else:
+                user_content += "\n\nNote: You have been provided with 1 initial keyword above. In STEP 1 — Brainstorm Topic, you should use these as a starting point and brainstorm a research topic that needs multi-step reasoning, cross-document synthesis, and the generation of evidence-backed, long-form answers yourself."
+
+        # evidence_first injects no complexity axes: when they were stated up front the
+        # model committed to a subject to satisfy them before any search. The axes are
+        # measured afterwards from the trajectory instead (extract_evidence.py).
+        if PROMPT_VARIANT != 'evidence_first' and complexity_class:
             complexity_instruction = f"\n\nIMPORTANT: You must generate a task with complexity class {complexity_class}.\n"
             user_content += complexity_instruction
-        
+
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
         
         num_llm_calls_available = MAX_LLM_CALL_PER_RUN
@@ -482,8 +505,45 @@ class MultiTurnReactAgent(FnCallAgent):
                                 try:
                                     tool_call = json.loads(cleaned_call)
                                 except:
-                                    raise parse_error
-                            
+                                    # Qwen models fall back to their native XML call
+                                    # syntax when the JSON form is not reinforced:
+                                    #   <function=search>
+                                    #   <arguments>
+                                    #   {"query": [...]}
+                                    # A run that slips into this format never
+                                    # recovers on its own - one trajectory spent 25
+                                    # calls repeating it, read the error each time,
+                                    # and still produced its question with zero
+                                    # retrieved evidence.
+                                    fn = re.search(
+                                        r'<function\s*=\s*([\w\-]+)\s*>(.*)',
+                                        tool_call_raw, re.DOTALL)
+                                    if not fn:
+                                        raise parse_error
+                                    body = fn.group(2)
+                                    arg_match = re.search(
+                                        r'<arguments>(.*?)(?:</arguments>|$)',
+                                        body, re.DOTALL)
+                                    arg_text = (arg_match.group(1) if arg_match else body).strip()
+                                    brace = arg_text.find('{')
+                                    if brace == -1:
+                                        raise parse_error
+                                    depth, end = 0, -1
+                                    for i, ch in enumerate(arg_text[brace:], brace):
+                                        if ch == '{':
+                                            depth += 1
+                                        elif ch == '}':
+                                            depth -= 1
+                                            if depth == 0:
+                                                end = i
+                                                break
+                                    if end == -1:
+                                        raise parse_error
+                                    tool_call = {
+                                        "name": fn.group(1),
+                                        "arguments": json5.loads(arg_text[brace:end + 1]),
+                                    }
+
                             tool_name = tool_call.get('name', '')
                             tool_args = tool_call.get('arguments', {})
                             # Create deep copy of tool_args for saving query, avoid circular reference
@@ -590,13 +650,16 @@ class MultiTurnReactAgent(FnCallAgent):
                 "text": messages[-1]['content'],
                 "json": messages[-1]['content']
             }
+        # complexity_class is a three-key dict from generate_longform_tasks.py, but be
+        # tolerant of None so a finished run is never lost at the last step.
+        cc = getattr(self, 'complexity_class', None)
         result = {
             "question": question,
             "answer": answer,
             "messages": messages,
             "prediction": prediction,
             "termination": termination,
-            "complexity_class": "_".join(getattr(self, 'complexity_class', None).values()),
+            "complexity_class": "_".join(cc.values()) if isinstance(cc, dict) else (cc or "none"),
             "iteration_id": iteration_id,
             "subcategory": subcategory,
             "cost_info": total_cost_info.copy(),  # Record cumulative cost info

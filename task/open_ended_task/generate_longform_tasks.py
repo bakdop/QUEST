@@ -170,7 +170,13 @@ def sample_complexity_class_with_weights(complexity_classes, lock):
         selected_class = random.choice(complexity_classes)
         return selected_class
 
-# Mapping from Domain to CSV files
+# Mapping from Domain to CSV files.
+#
+# Upstream drew six subcategories from entertainment.csv, and questions seeded from
+# that shared pool were the weakest. Two of them move to pools that were unused:
+#   General Info.       -> other.csv
+#   Ticketed Activities -> hobbies_leisure.csv
+# climate.csv and autos_vehicles.csv are still unmapped.
 DOMAIN_TO_CSV = {
     # Lifestyle & Leisure
     "Shopping": "shopping.csv",
@@ -187,8 +193,8 @@ DOMAIN_TO_CSV = {
     "Music": "entertainment.csv",
     "Books & Reading": "entertainment.csv",
     # Misc.
-    "General Info.": "entertainment.csv",  
-    "News": "politics.csv",  
+    "General Info.": "other.csv",
+    "News": "politics.csv",
     "Legal & Government Services": "law_government.csv",
     "Real Estate": "business_finance.csv",  
     "Finance & Investment": "business_finance.csv",
@@ -201,7 +207,7 @@ DOMAIN_TO_CSV = {
     # Travel & Transportation
     "Travel & Accommodation": "travel_transportation.csv",
     "Outdoor & Recreation": "travel_transportation.csv",
-    "Ticketed Activities": "entertainment.csv",  
+    "Ticketed Activities": "hobbies_leisure.csv",
 }
 
 TRENDING_KEYWORDS_DIR = "../trending_keywords/merge_keywords"
@@ -378,10 +384,12 @@ async def main():
     Main async function, execute all iterations concurrently
     """
     # Total number of tasks: control the total number to generate
-    num_iterations = 10  # Can be modified as needed
-    
+    num_iterations = int(os.environ.get("NUM_ITERATIONS", 10))
+
     # Concurrency control: use Semaphore to limit the number of workers running simultaneously
-    workers = 1  # Can be modified as needed
+    workers = int(os.environ.get("WORKERS", 1))
+
+    print(f"Config: num_iterations={num_iterations}, workers={workers}")
     
     # Create thread pool executor
     global executor
