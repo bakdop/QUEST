@@ -26,7 +26,7 @@ Two virtualenvs at the repo root, both used by the launchers:
 
 | venv | contents | used for |
 |---|---|---|
-| `.venv` | `pip install -r requirements.txt` (tested: Python 3.10, litellm 1.77.1, qwen-agent 0.0.26) | generation, extraction, rubrics |
+| `.venv` | Python 3.10, `pip install -r requirements-longform.txt` (pinned; the upstream `requirements.txt` also pulls torch + an older vllm, which this pipeline does not use) | generation, extraction, rubrics |
 | `.venv-vllm` | `pip install vllm==0.26.0` | serving the model |
 
 Model: `Qwen3.5-122B-A10B` (bf16, ~234 GB), served by vLLM as `qwen3.5-122b`.
